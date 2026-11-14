@@ -29,10 +29,74 @@ def config_path() -> Path:
 
 
 def log_file() -> Path | None:
-    """Where to write our own log. Linux logs to stdout (systemd journal) instead."""
+    """Where to write our own log (None = stdout only, e.g. under systemd)."""
     if IS_WINDOWS:
         return _local_appdata() / "Studiocord" / "studiocord.log"
+    if FROZEN:  # the standalone app always keeps a log file ("Open log" in the tray)
+        state = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+        return state / "studiocord" / "studiocord.log"
     return None
+
+
+def has_display() -> bool:
+    return IS_WINDOWS or bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
+
+
+# --- start at login ----------------------------------------------------------------
+# Only offered for the standalone builds: a source checkout is started however its
+# owner set it up (e.g. install.sh's systemd service).
+
+AUTOSTART_DESKTOP = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "autostart" / "studiocord.desktop"
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def autostart_supported() -> bool:
+    return FROZEN
+
+
+def autostart_enabled() -> bool:
+    if IS_WINDOWS:
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
+                winreg.QueryValueEx(k, "Studiocord")
+                return True
+        except OSError:
+            return False
+    return AUTOSTART_DESKTOP.exists()
+
+
+def set_autostart(enabled: bool):
+    exe = sys.executable
+    if IS_WINDOWS:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as k:
+            if enabled:
+                winreg.SetValueEx(k, "Studiocord", 0, winreg.REG_SZ, f'"{exe}" --autostart')
+            else:
+                try:
+                    winreg.DeleteValue(k, "Studiocord")
+                except FileNotFoundError:
+                    pass
+        return
+    if enabled:
+        AUTOSTART_DESKTOP.parent.mkdir(parents=True, exist_ok=True)
+        AUTOSTART_DESKTOP.write_text(
+            "[Desktop Entry]\nType=Application\nName=Studiocord\n"
+            "Comment=Discord Rich Presence for Roblox Studio\n"
+            f'Exec="{exe}" --autostart\nIcon=studiocord\nX-GNOME-Autostart-enabled=true\n')
+    else:
+        AUTOSTART_DESKTOP.unlink(missing_ok=True)
+
+
+def open_path(path):
+    """Open a file or folder with the system's default app."""
+    import subprocess
+    if IS_WINDOWS:
+        os.startfile(str(path))  # noqa: S606 - user-initiated
+    else:
+        subprocess.Popen(["xdg-open", str(path)], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 VINEGAR = Path.home() / ".var" / "app" / "org.vinegarhq.Vinegar" / "data" / "vinegar"
@@ -176,3 +240,20 @@ def discord_endpoints() -> list[str]:
             if os.path.exists(p):
                 found.append(p)
     return found
+
+
+def discord_running() -> bool:
+    """Is a Discord client listening for Rich Presence right now?"""
+    if IS_WINDOWS:
+        return any(os.path.exists(rf"\\.\pipe\discord-ipc-{i}") for i in range(10))
+    import socket
+    for path in discord_endpoints():
+        # The socket file can outlive Discord, so actually knock on the door.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(0.5)
+            try:
+                s.connect(path)
+                return True
+            except OSError:
+                continue
+    return False

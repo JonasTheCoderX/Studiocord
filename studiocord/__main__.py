@@ -1,9 +1,10 @@
 """Studiocord: Discord Rich Presence for Roblox Studio (Windows, and Linux via Vinegar).
 
-Runs forever in the background. While Roblox Studio runs, it follows Studio's own
-log files and shows what you're doing on Discord. When Studio closes, it clears it.
+Runs in the background with a tray icon. While Roblox Studio runs, it follows Studio's
+own log files and shows what you're doing on Discord. When Studio closes, it clears it.
 
-    studiocord                 run (normally started at login)
+    studiocord                 run (tray icon if a desktop is available)
+    studiocord --headless      run without tray icon / windows
     studiocord --dry-run       print presence instead of sending it to Discord
     studiocord --replay LOG    replay a Studio log file and print each presence
     studiocord --diagnose      show what Studiocord can find on this computer
@@ -17,46 +18,25 @@ import logging.handlers
 import os
 import signal
 import sys
+import threading
 import time
-import tomllib
-from pathlib import Path
+from dataclasses import dataclass
 
+from . import WATERMARK, __version__, script_server, settings, system
 from .discord_ipc import DiscordError, DiscordIPC
 from .roblox_api import PlaceLookup
-from . import WATERMARK, __version__, script_server, system
 from .studio_log import DOC_SCRIPT, LogFollower, StudioState, apply_line
 
 log = logging.getLogger("studiocord")
 
 CONFIG_PATH = system.config_path()
-
-DEFAULTS = {
-    # Discord application whose name/icon is shown ("Playing <name>").
-    # Default: Vinegar's own "Roblox Studio" app, which has the "place"/"script" images.
-    "client_id": "1159891020956323923",
-    "logs_dir": "",              # empty = Studio's default for this OS
-    "show_place_name": True,     # False = just "Editing a place", no name or icon
-    "show_button": True,         # "View on Roblox" button for published places
-    "show_team_create": True,
-    "show_script_name": True,
-    "show_line_count": True,     # "Editing Main (120 lines)"; both need the Studio plugin
-    "plugin_port": 47231,
-    "auto_install_plugin": True, # put the plugin back if it is missing/outdated
-    "show_idle": True,           # show presence on the start page (no place open)
-    "poll_seconds": 1.0,
-}
-
 MIN_SEND_INTERVAL = 4.0   # Discord allows ~5 updates per 20 s
 RECONNECT_INTERVAL = 15.0
+PLUGIN_STALE_AFTER = 60   # the plugin checks in at least every 20 s
 
 
 def load_config():
-    cfg = dict(DEFAULTS)
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH, "rb") as f:
-            cfg.update(tomllib.load(f))
-    cfg["logs_dir"] = os.path.expanduser(cfg["logs_dir"] or system.default_logs_dir())
-    return cfg
+    return settings.load()
 
 
 # --- Studio plugin upkeep --------------------------------------------------------
@@ -174,7 +154,30 @@ def describe(act):
     return s
 
 
+def short_text(act):
+    """Presence as a person would read it on Discord."""
+    if not isinstance(act, dict):
+        return ""
+    return " · ".join(x for x in (act.get("details"), act.get("state", "").strip()) if x)
+
+
 # --- main loop -----------------------------------------------------------------
+
+@dataclass
+class Status:
+    studio_running: bool = False
+    discord: str = "unknown"        # "connected", "detected", "not detected", "dry run"
+    discord_user: str = ""
+    discord_error: str = ""
+    plugin_seen: bool = False
+    plugin_folders: int = 0
+    presence: str = ""              # what Discord currently shows ("" = nothing)
+    paused: bool = False
+
+    def key(self):
+        return (self.studio_running, self.discord, self.discord_error, self.plugin_seen,
+                self.plugin_folders, self.presence, self.paused)
+
 
 class Daemon:
     def __init__(self, cfg, dry_run=False):
@@ -188,13 +191,49 @@ class Daemon:
         self.last_send = 0.0
         self.last_connect_try = 0.0
         self.running = True
+        self.paused = False
+        self.status = Status()
+        self.on_change = lambda: None   # called (from the loop's thread) when status changes
+        self.commands = {}              # extra /app/<cmd> handlers (the tray adds some)
+        self._lock = threading.Lock()
+        self._pending_cfg = None
 
     def stop(self, *_):
         self.running = False
 
+    def set_paused(self, paused: bool):
+        self.paused = paused
+        self.last_send = 0  # apply right away
+
+    def apply_config(self, cfg):
+        """Take new settings (from the settings window); applied on the next tick."""
+        with self._lock:
+            self._pending_cfg = dict(cfg)
+
+    def _take_pending_config(self):
+        with self._lock:
+            new, self._pending_cfg = self._pending_cfg, None
+        if new is None:
+            return
+        old = self.cfg
+        self.cfg = new
+        if new["client_id"] != old["client_id"]:
+            if self.discord.connected:
+                try:
+                    self.discord.set_activity(None)
+                except DiscordError:
+                    pass
+            self.discord.close()
+            self.discord = DiscordIPC(new["client_id"])
+            self.last_connect_try = 0
+        if settings.logs_dir(new) != settings.logs_dir(old):
+            self._drop_logs()
+        self.sent, self.last_send = object(), 0  # re-send with the new settings
+        log.info("Settings updated")
+
     def _sync_logs(self, earliest_start):
         """Follow every Studio log written since Studio started."""
-        pattern = os.path.join(self.cfg["logs_dir"], "*_Studio_*_last.log")
+        pattern = os.path.join(settings.logs_dir(self.cfg), "*_Studio_*_last.log")
         for path in glob.glob(pattern):
             if path in self.followers:
                 continue
@@ -248,7 +287,9 @@ class Daemon:
             self.last_connect_try = now
             try:
                 self.discord.connect()
+                self.status.discord_error = ""
             except DiscordError as e:
+                self.status.discord_error = str(e)
                 log.info("%s; retrying in %ds", e, RECONNECT_INTERVAL)
                 return
         try:
@@ -259,31 +300,59 @@ class Daemon:
                 self.discord.close()  # nothing to show: let go of Discord entirely
         except DiscordError as e:
             log.warning("Discord update failed: %s", e)
+            self.status.discord_error = str(e)
             self.discord.close()
             self.sent = object()
 
-    def run(self):
-        signal.signal(signal.SIGTERM, self.stop)
-        signal.signal(signal.SIGINT, self.stop)
-        log.info("%s v%s - watching for Roblox Studio (logs: %s)", WATERMARK, __version__,
-                 self.cfg["logs_dir"])
-        if self.cfg["show_script_name"]:
+    def _update_status(self, studio_running, discord_found):
+        st = self.status
+        before = st.key()
+        st.studio_running = studio_running
+        st.paused = self.paused
+        if self.dry_run:
+            st.discord = "dry run"
+        elif self.discord.connected:
+            st.discord = "connected"
+            st.discord_user = (self.discord.user or {}).get("username", "")
+            st.discord_error = ""
+        else:
+            st.discord = "detected" if discord_found else "not detected"
+        st.plugin_seen = time.time() - self.script.snapshot()[4] < PLUGIN_STALE_AFTER
+        st.presence = short_text(self.sent)
+        if st.key() != before:
+            try:
+                self.on_change()
+            except Exception:  # never let the UI break the loop
+                log.exception("status callback failed")
+
+    def run(self, install_signals=True):
+        """The main loop. Returns False if another Studiocord is already running."""
+        if install_signals:
+            signal.signal(signal.SIGTERM, self.stop)
+            signal.signal(signal.SIGINT, self.stop)
+        if script_server.port_in_use(self.cfg["plugin_port"]):
             # Our port doubles as a single-instance lock (autostart + manual start).
-            if script_server.port_in_use(self.cfg["plugin_port"]):
-                log.info("Studiocord is already running; exiting")
-                return
-            script_server.start(self.script, self.cfg["plugin_port"])
+            log.info("Studiocord is already running; exiting")
+            self.running = False
+            return False
+        log.info("%s v%s - watching for Roblox Studio (logs: %s)", WATERMARK, __version__,
+                 settings.logs_dir(self.cfg))
+        script_server.start(self.script, self.cfg["plugin_port"],
+                            {"quit": self.stop, **self.commands})
         studio_was_running = False
-        last_proc_scan, starts = 0.0, []
+        last_scan, starts, discord_found = 0.0, [], False
         last_plugin_check = 0.0
         while self.running:
+            self._take_pending_config()
             now = time.time()
-            if self.cfg["auto_install_plugin"] and self.cfg["show_script_name"] \
-                    and now - last_plugin_check >= 15:
-                ensure_plugin(self.cfg)
+            if now - last_plugin_check >= 15:
+                if self.cfg["auto_install_plugin"] and self.cfg["show_script_name"]:
+                    ensure_plugin(self.cfg)
+                self.status.plugin_folders = len(system.plugin_dirs())
                 last_plugin_check = now
-            if now - last_proc_scan >= 2:
-                starts, last_proc_scan = system.studio_start_times(), now
+            if now - last_scan >= 2:
+                starts, last_scan = system.studio_start_times(), now
+                discord_found = system.discord_running()
             if starts:
                 if not studio_was_running:
                     log.info("Roblox Studio started")
@@ -292,17 +361,16 @@ class Daemon:
                 state = self._update_states()
                 act = (build_activity(state, self.lookup, self.cfg, min(starts),
                                       self.script.snapshot()) if state else None)
-                self._send(act)
+                self._send(None if self.paused else act)
             else:
                 if studio_was_running:
                     log.info("Roblox Studio closed")
                     studio_was_running = False
                     self._drop_logs()
-                    with self.script.lock:
-                        self.script.name = self.script.path = self.script.cls = ""
-                        self.script.lines = None
+                    self.script.clear()
                     self.last_send = 0  # clear right away
                 self._send(None)
+            self._update_status(bool(starts), discord_found)
             time.sleep(self.cfg["poll_seconds"])
         if self.discord.connected:
             try:
@@ -311,6 +379,7 @@ class Daemon:
                 pass
             self.discord.close()
         log.info("Stopped")
+        return True
 
 
 def replay(path, cfg):
@@ -331,17 +400,27 @@ def replay(path, cfg):
     print("final (with lookups):", describe(build_activity(st, lookup, cfg, 0)))
 
 
+def _gui_available():
+    try:
+        import PySide6.QtWidgets  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def diagnose(cfg):
     """Print what Studiocord sees; handy for bug reports (and the CI smoke test)."""
+    logs = settings.logs_dir(cfg)
     print(f"{WATERMARK} v{__version__} on {sys.platform}, frozen={system.FROZEN}")
     print("config:", CONFIG_PATH, "(exists)" if CONFIG_PATH.exists() else "(defaults)")
-    print("logs dir:", cfg["logs_dir"], "(exists)" if os.path.isdir(cfg["logs_dir"]) else "(missing)")
-    logs = glob.glob(os.path.join(cfg["logs_dir"], "*_Studio_*_last.log"))
-    print("studio logs:", len(logs))
+    print("logs dir:", logs, "(exists)" if os.path.isdir(logs) else "(missing)")
+    print("studio logs:", len(glob.glob(os.path.join(logs, "*_Studio_*_last.log"))))
     print("studio processes:", len(system.studio_start_times()))
     print("plugin source:", PLUGIN_SRC, "(ok)" if PLUGIN_SRC.exists() else "(MISSING)")
     print("plugin folders:", [str(p) for p in system.plugin_dirs()] or "none found")
-    print("discord endpoints:", system.discord_endpoints() or "none found")
+    print("discord running:", system.discord_running(), system.discord_endpoints())
+    print("display:", system.has_display(), "| gui toolkit:", _gui_available())
+    print("log file:", system.log_file() or "stdout")
     return 0 if PLUGIN_SRC.exists() else 1
 
 
@@ -363,34 +442,68 @@ def _setup_logging(verbose):
 
 
 def main():
+    if sys.stderr is not None:  # print a traceback if Qt or ctypes ever crash hard
+        import faulthandler
+        faulthandler.enable()
     ap = argparse.ArgumentParser(prog="studiocord", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--headless", action="store_true", help="no tray icon or windows")
+    ap.add_argument("--autostart", action="store_true", help="started at login: don't open windows")
     ap.add_argument("--dry-run", action="store_true", help="print presence, don't touch Discord")
     ap.add_argument("--replay", metavar="LOG", help="replay a Studio log file and exit")
     ap.add_argument("--diagnose", action="store_true", help="show what Studiocord finds, then exit")
+    ap.add_argument("--quit", action="store_true", help="ask a running Studiocord to quit")
     ap.add_argument("--install", action="store_true", help="(Linux build) install and start")
     ap.add_argument("--uninstall", action="store_true", help="(Linux build) remove Studiocord")
+    ap.add_argument("--gui-selftest", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--version", action="version", version=f"{WATERMARK}, v{__version__}")
     args = ap.parse_args()
 
+    gui = _gui_available() and system.has_display() and not args.headless
+
     if not system.IS_WINDOWS:
         from . import installer
+        # The downloaded Linux build is its own installer.
+        wants_installer = system.FROZEN and len(sys.argv) == 1 and not installer.is_installed_copy()
         if args.uninstall:
-            sys.exit(installer.uninstall())
-        # The downloaded Linux build installs itself when started from anywhere else.
-        if args.install or (system.FROZEN and len(sys.argv) == 1
-                            and not installer.is_installed_copy()):
-            sys.exit(installer.install())
+            sys.exit(installer.uninstall_cli())
+        if args.install or wants_installer:
+            if gui and not args.install:
+                from .install_gui import run_installer_gui
+                sys.exit(run_installer_gui())
+            sys.exit(installer.install_cli())
 
     _setup_logging(args.verbose)
     cfg = load_config()
+    if args.quit:
+        sent = script_server.send_command("quit", cfg["plugin_port"])
+        for _ in range(40):  # wait until it's gone (it clears the Discord status first)
+            if not script_server.port_in_use(cfg["plugin_port"]):
+                break
+            time.sleep(0.25)
+        sys.exit(0 if sent else 1)
     if args.diagnose:
         sys.exit(diagnose(cfg))
     if args.replay:
         replay(args.replay, cfg)
         return
-    Daemon(cfg, dry_run=args.dry_run).run()
+    if args.gui_selftest:
+        from .tray import selftest
+        sys.exit(selftest())
+
+    if script_server.port_in_use(cfg["plugin_port"]):
+        # Already running: bring up its settings instead of starting a second copy.
+        if gui and not args.autostart:
+            script_server.send_command("show-settings", cfg["plugin_port"])
+        log.info("Studiocord is already running")
+        return
+
+    daemon = Daemon(cfg, dry_run=args.dry_run)
+    if gui:
+        from .tray import run_tray
+        sys.exit(run_tray(daemon, show_settings=not args.autostart))
+    daemon.run()
 
 
 if __name__ == "__main__":

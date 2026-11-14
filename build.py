@@ -1,6 +1,6 @@
 """Builds the standalone Studiocord program with PyInstaller (no Python needed to run it).
 
-    pip install pyinstaller
+    pip install pyinstaller PySide6-Essentials
     python build.py            -> dist/Studiocord-Installer-Linux   (on Linux)
                                -> dist/studiocord.exe               (on Windows; then
                                   installer/studiocord.iss makes Studiocord-Setup.exe)
@@ -18,6 +18,9 @@ cmd = [sys.executable, "-m", "PyInstaller", "--onefile", "--clean", "--noconfirm
        "--name", name,
        "--add-data", f"{ROOT / 'plugin' / 'Studiocord.lua'}:plugin",
        "--add-data", f"{ROOT / 'config.example.toml'}:.",
+       "--add-data", f"{ROOT / 'installer' / 'studiocord.png'}:installer",
+       # Only QtCore/QtGui/QtWidgets are used; keep the download small.
+       "--exclude-module", "tkinter",
        *sys.argv[1:]]
 if WINDOWS:
     cmd += ["--noconsole", "--icon", str(ROOT / "installer" / "studiocord.ico")]

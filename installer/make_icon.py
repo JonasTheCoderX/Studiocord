@@ -21,3 +21,17 @@ d.ellipse([740, 740, 920, 920], fill=(35, 165, 90, 255))    # green dot
 img.save(HERE / "studiocord.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 img.resize((256, 256), Image.LANCZOS).save(HERE / "studiocord.png")
 print("wrote", HERE / "studiocord.ico")
+
+# Windows setup wizard images (Inno Setup wants 24-bit BMPs).
+def wizard_bmp(w, h, icon_size, name):
+    bg = Image.new("RGB", (w, h), (88, 101, 242))
+    ic = img.resize((icon_size, icon_size), Image.LANCZOS)
+    flat = Image.new("RGB", ic.size, (88, 101, 242))
+    flat.paste(ic, mask=ic.split()[3])
+    bg.paste(flat, ((w - icon_size) // 2, (h - icon_size) // 2))
+    bg.save(HERE / name)
+
+
+wizard_bmp(164, 314, 128, "studiocord-wizard.bmp")   # welcome / finish page
+wizard_bmp(55, 58, 52, "studiocord-small.bmp")       # top-right on the other pages
+print("wrote wizard images")

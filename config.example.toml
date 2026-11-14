@@ -1,9 +1,7 @@
-# Studiocord settings.
-#   Windows: %APPDATA%\Studiocord\config.toml    (Start menu > Studiocord > Studiocord settings)
+# Studiocord settings. Easiest: tray icon > Settings, which saves this file for you.
+#   Windows: %APPDATA%\Studiocord\config.toml
 #   Linux:   ~/.config/studiocord/config.toml
-# After editing, restart Studiocord:
-#   Windows: sign out and in again, or end "studiocord.exe" in Task Manager and run it again
-#   Linux:   systemctl --user restart studiocord
+# If you edit it by hand, quit Studiocord (tray icon > Quit) and start it again.
 
 # Discord application shown as "Playing <name>". Default is Vinegar's "Roblox Studio"
 # app (it has the "place" and "script" small icons). Make your own at

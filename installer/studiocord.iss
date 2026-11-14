@@ -17,6 +17,7 @@ AppComments=Discord Rich Presence for Roblox Studio
 ; Per-user install: no admin prompt needed.
 PrivilegesRequired=lowest
 DefaultDirName={localappdata}\Programs\Studiocord
+DisableWelcomePage=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
@@ -29,6 +30,14 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=no
+WizardImageFile=studiocord-wizard.bmp
+WizardSmallImageFile=studiocord-small.bmp
+
+[Messages]
+WelcomeLabel2=This will install [name/ver] on your computer.%n%nStudiocord shows what you're doing in Roblox Studio on your Discord profile: the place, the script you're editing, playtesting and Team Create.%n%nIt runs in the background with an icon in the system tray. Click its icon for status and settings.
+
+[Tasks]
+Name: "startup"; Description: "Start Studiocord with Windows"; GroupDescription: "Options:"
 
 [Files]
 Source: "..\dist\studiocord.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -40,16 +49,14 @@ Source: "..\config.example.toml"; DestDir: "{userappdata}\Studiocord"; DestName:
 
 [Registry]
 ; Start with Windows.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Studiocord"; ValueData: """{app}\studiocord.exe"""; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Studiocord"; ValueData: """{app}\studiocord.exe"" --autostart"; Flags: uninsdeletevalue; Tasks: startup
 
 [Icons]
-Name: "{userprograms}\Studiocord\Studiocord settings"; Filename: "{userappdata}\Studiocord\config.toml"
-Name: "{userprograms}\Studiocord\Studiocord log"; Filename: "{localappdata}\Studiocord\studiocord.log"
-Name: "{userprograms}\Studiocord\Uninstall Studiocord"; Filename: "{uninstallexe}"
+; Opens the settings window (of the running copy, or starts one).
+Name: "{userprograms}\Studiocord"; Filename: "{app}\studiocord.exe"; Comment: "Discord Rich Presence for Roblox Studio"
 
 [Run]
-; Start it right away (it runs in the background, no window).
-Filename: "{app}\studiocord.exe"; Flags: nowait runasoriginaluser
+Filename: "{app}\studiocord.exe"; Description: "Launch Studiocord"; Flags: nowait postinstall runasoriginaluser
 
 [UninstallDelete]
 ; The Studio plugin it put in place, and its own log.
@@ -60,7 +67,12 @@ Type: filesandordirs; Name: "{localappdata}\Studiocord"
 procedure StopStudiocord();
 var
   ResultCode: Integer;
+  Exe: String;
 begin
+  // Ask nicely first, so it clears the Discord status; then make sure.
+  Exe := ExpandConstant('{localappdata}\Programs\Studiocord\studiocord.exe');
+  if FileExists(Exe) then
+    Exec(Exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM studiocord.exe', '', SW_HIDE,
        ewWaitUntilTerminated, ResultCode);
 end;

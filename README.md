@@ -28,42 +28,50 @@ Download the latest version from **[Releases](../../releases/latest)**. You don'
 
 ### Windows
 
-Run **`Studiocord-Setup.exe`**. It installs for your user only, so it doesn't need admin
-rights. It starts right away and then starts with Windows. It has no window: open Discord
-and Roblox Studio and your status appears.
-
-- Settings: Start menu → Studiocord → *Studiocord settings*
-- Log: Start menu → Studiocord → *Studiocord log*
-- Uninstall: Settings → Apps, or Start menu → Studiocord → *Uninstall Studiocord*
+Run **`Studiocord-Setup.exe`** and follow the wizard. It installs for your user only, so it
+doesn't need admin rights. You choose whether Studiocord starts with Windows, and it starts
+when setup finishes. To uninstall, use Settings → Apps.
 
 Windows SmartScreen may warn about the installer because it isn't code-signed. Click
 *More info* → *Run anyway*.
 
 ### Linux
 
-Download **`Studiocord-Installer-Linux`**, make it executable and run it:
+Download **`Studiocord-Installer-Linux`**, make it executable and open it:
 
 ```sh
 chmod +x Studiocord-Installer-Linux
 ./Studiocord-Installer-Linux
 ```
 
-It copies itself to `~/.local/share/studiocord/`, sets itself up to start at login (a systemd
-user service, or an autostart entry on systems without systemd) and starts. You can delete
-the downloaded file afterwards. To update, run the newer installer the same way.
-
-```sh
-journalctl --user -u studiocord -f              # live log
-systemctl --user restart studiocord             # after editing the settings
-~/.local/share/studiocord/studiocord --uninstall
-```
-
-Settings: `~/.config/studiocord/config.toml`.
+An installer window opens. Click **Install**: Studiocord copies itself to
+`~/.local/share/studiocord/`, adds itself to your app menu and (if you leave the box
+ticked) to the programs that start at login, then starts. You can delete the downloaded
+file afterwards. To update, open a newer installer the same way. To uninstall, open the
+installer again and click **Uninstall**, or run `~/.local/share/studiocord/studiocord --uninstall`.
+Without a desktop, `--install` installs from the terminal instead.
 
 On Linux, Studiocord works with Roblox Studio running through Vinegar. If Vinegar's own
 "Discord Rich Presence" option works for you, turn one of them off so they don't fight.
 Vinegar 1.9.4's built-in presence doesn't work with newer Kombucha (Wine) builds, which
 is why Studiocord reads the log files directly.
+
+## Tray icon and settings
+
+Studiocord sits in the system tray. Its corner dot shows the status, like on Discord:
+
+| Dot    | Meaning                                                   |
+|--------|-----------------------------------------------------------|
+| green  | showing your status on Discord                            |
+| grey   | waiting for Roblox Studio, or paused                      |
+| yellow | Studio is running, but Discord wasn't found               |
+| red    | Discord is running, but Studiocord can't reach it         |
+
+Right-click it to see what's going on (Roblox Studio, Discord, the Studio plugin, what's
+shown), to **pause** it, or to **quit**. Click it, or open Studiocord from the Start/app
+menu, for the **settings window**: what to show on Discord, start at login, and a live
+status. On desktops without a tray (e.g. GNOME without the AppIndicator extension), the
+settings window opens instead.
 
 ## Script names
 
@@ -77,24 +85,26 @@ Studiocord checks every 15 seconds that the plugin is still there and up to date
 it back if it was deleted or Studio was reinstalled. Studio loads a newly added plugin
 right away, but an updated plugin only takes effect after restarting Studio.
 
-## Settings
+## Settings file
 
-See [`config.example.toml`](config.example.toml). Everything can be turned off, for
-example place names, the button, script names and line counts.
+Everything in the settings window is stored in `config.toml`
+(`%APPDATA%\Studiocord` on Windows, `~/.config/studiocord` on Linux). See
+[`config.example.toml`](config.example.toml).
 
 ## Running from source
 
-Needs Python 3.11 or newer and nothing else.
+Needs Python 3.11 or newer. The tray icon and windows also need
+`pip install PySide6-Essentials`; without it, Studiocord runs without them.
 
 ```sh
-python3 -m studiocord              # run in the foreground
+python3 -m studiocord              # run (with tray icon if PySide6 is installed)
 python3 -m studiocord --diagnose   # show what it finds (logs, Studio, Discord, plugin folder)
 python3 -m studiocord --dry-run    # live, but print the status instead of sending it
 python3 -m studiocord --replay <Studio log file>   # replay an old Studio session
 ./install.sh                       # Linux: run this checkout as a systemd user service
 ```
 
-Building the standalone programs: `pip install pyinstaller && python build.py`. On Windows,
+Building the standalone programs: `pip install pyinstaller PySide6-Essentials && python build.py`. On Windows,
 then run `iscc installer\studiocord.iss` (Inno Setup 6).
 
 Releases come from GitHub Actions ("Build & release"). Running it by hand with *publish*
@@ -109,10 +119,12 @@ full release with `gh release edit v1.0.0 --prerelease=false --latest`.
 - `studiocord/discord_ipc.py` is a tiny Discord IPC client (Unix socket or Windows named pipe).
 - `studiocord/script_server.py` is the localhost endpoint the plugin talks to.
 - `studiocord/roblox_api.py` looks up place names and icons in the background.
-- `studiocord/installer.py` is the self-installer for the Linux build.
+- `studiocord/tray.py` is the tray icon and settings window.
+- `studiocord/settings.py` loads and saves `config.toml`.
+- `studiocord/installer.py` and `install_gui.py` are the Linux build's installer (logic and window).
 - `studiocord/__main__.py` runs the main loop.
 - `plugin/Studiocord.lua` is the Studio plugin that reports the focused script.
-- `installer/` holds the Windows installer script (Inno Setup) and the icon.
+- `installer/` holds the Windows installer script (Inno Setup), the icon and the wizard images (`make_icon.py` draws them).
 
 ## License
 

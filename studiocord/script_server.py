@@ -1,10 +1,18 @@
-"""Tiny localhost HTTP endpoint the Studio plugin posts the focused script to."""
+"""Tiny localhost HTTP endpoint.
+
+- POST /script      the Studio plugin reports the focused script
+- POST /app/<cmd>   another Studiocord process (second launch, installer) asks the
+                    running one to show its settings or to quit. Needs the
+                    X-Studiocord header, which web pages can't send without a
+                    CORS preflight that we never answer.
+"""
 
 import json
 import logging
 import sys
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import WATERMARK
@@ -20,12 +28,18 @@ class ScriptInfo:
         self.path = ""
         self.cls = ""
         self.lines = None
-        self.updated_at = 0.0
+        self.updated_at = 0.0   # last time the plugin checked in
         self.lock = threading.Lock()
 
     def snapshot(self):
         with self.lock:
             return self.name, self.path, self.cls, self.lines, self.updated_at
+
+    def clear(self):
+        with self.lock:
+            self.name = self.path = self.cls = ""
+            self.lines = None
+            self.updated_at = 0.0
 
 
 class _Server(ThreadingHTTPServer):
@@ -48,17 +62,43 @@ def port_in_use(port: int = PORT) -> bool:
         return s.connect_ex(("127.0.0.1", port)) == 0
 
 
-def start(info: ScriptInfo, port: int = PORT):
+def send_command(cmd: str, port: int = PORT) -> bool:
+    """Ask the running Studiocord to do something ("show-settings", "quit")."""
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/app/{cmd}", data=b"",
+                                 method="POST", headers={"X-Studiocord": "1"})
+    try:
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return r.status == 204
+    except OSError:
+        return False
+
+
+def start(info: ScriptInfo, port: int = PORT, commands: dict | None = None):
+    commands = commands or {}
+
     class Handler(BaseHTTPRequestHandler):
+        def _reply(self, code):
+            self.send_response(code)
+            self.send_header("X-Powered-By", WATERMARK)
+            self.end_headers()
+
         def do_POST(self):
+            if self.path.startswith("/app/"):
+                fn = commands.get(self.path[5:])
+                if fn is None or self.headers.get("X-Studiocord") != "1":
+                    self._reply(404)
+                    return
+                self._reply(204)
+                fn()
+                return
             if self.path != "/script":
-                self.send_error(404)
+                self._reply(404)
                 return
             try:
                 length = min(int(self.headers.get("Content-Length", 0)), 4096)
                 data = json.loads(self.rfile.read(length) or b"{}")
             except (ValueError, OSError):
-                self.send_error(400)
+                self._reply(400)
                 return
             with info.lock:
                 new = (str(data.get("name", ""))[:100], str(data.get("path", ""))[:300],
@@ -71,9 +111,7 @@ def start(info: ScriptInfo, port: int = PORT):
                 info.name, info.path, info.cls = new
                 info.lines = lines
                 info.updated_at = time.time()
-            self.send_response(204)
-            self.send_header("X-Powered-By", WATERMARK)
-            self.end_headers()
+            self._reply(204)
 
         def log_message(self, *args):
             pass  # keep the journal clean

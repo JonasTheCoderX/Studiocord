@@ -43,7 +43,7 @@ jobs:
 
       - name: Build studiocord.exe
         run: |
-          pip install pyinstaller
+          pip install pyinstaller PySide6-Essentials
           python build.py
 
       - name: Self-test
@@ -51,6 +51,9 @@ jobs:
         run: |
           $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--diagnose" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "studiocord.exe --diagnose failed ($($p.ExitCode))" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--gui-selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "studiocord.exe --gui-selftest failed ($($p.ExitCode))" }
           Get-Content "$env:LOCALAPPDATA\Studiocord\studiocord.log" -ErrorAction SilentlyContinue
 
       - name: Build Studiocord-Setup.exe
@@ -83,13 +86,15 @@ jobs:
 
       - name: Build Studiocord-Installer-Linux
         run: |
-          pip install pyinstaller
+          pip install pyinstaller PySide6-Essentials
           python build.py
 
       - name: Self-test
         run: |
+          sudo apt-get update -q && sudo apt-get install -yq libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3
           dist/Studiocord-Installer-Linux --version
           dist/Studiocord-Installer-Linux --diagnose
+          QT_QPA_PLATFORM=offscreen dist/Studiocord-Installer-Linux --gui-selftest
 
       - uses: actions/upload-artifact@v4
         with:
