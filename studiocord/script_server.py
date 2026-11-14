@@ -22,29 +22,46 @@ log = logging.getLogger("plugin")
 PORT = 47231
 
 
+_EMPTY = ("", "", "", None, 0.0, 0, "")
+STALE_AFTER = 60  # the plugin checks in at least every 20 s
+
+
 class ScriptInfo:
+    """What each Studio's plugin last reported, kept apart per place.
+
+    With several Studios open, every one runs the plugin; keying by the place id it
+    reports keeps one Studio's script from showing up next to another's place.
+    Entries are tuples: (name, path, class, lines, updated_at, collaborators, place_name).
+    """
+
     def __init__(self):
-        self.name = ""
-        self.path = ""
-        self.cls = ""
-        self.lines = None
-        self.collaborators = 0  # people in the Team Create session (incl. you)
-        self.place_name = ""    # game.Name in Studio
-        self.updated_at = 0.0   # last time the plugin checked in
+        self.entries: dict = {}   # place id (int; None from plugins before 1.0.5) -> tuple
         self.lock = threading.Lock()
 
-    def snapshot(self):
+    def update(self, place_id, entry):
         with self.lock:
-            return (self.name, self.path, self.cls, self.lines, self.updated_at,
-                    self.collaborators, self.place_name)
+            self.entries[place_id] = entry
+
+    def snapshot(self, place_id=None):
+        """Info for the place being shown (falls back sensibly for local/new places)."""
+        now = time.time()
+        with self.lock:
+            live = {k: v for k, v in self.entries.items() if now - v[4] < STALE_AFTER}
+        if place_id in live:
+            return live[place_id]
+        if 0 in live:  # local file or a new place that isn't saved to Roblox yet
+            return live[0]
+        if None in live and len(live) == 1:  # an older plugin that doesn't say its place
+            return live[None]
+        return _EMPTY
+
+    def last_seen(self) -> float:
+        with self.lock:
+            return max((v[4] for v in self.entries.values()), default=0.0)
 
     def clear(self):
         with self.lock:
-            self.name = self.path = self.cls = ""
-            self.lines = None
-            self.collaborators = 0
-            self.place_name = ""
-            self.updated_at = 0.0
+            self.entries.clear()
 
 
 class _Server(ThreadingHTTPServer):
@@ -105,20 +122,21 @@ def start(info: ScriptInfo, port: int = PORT, commands: dict | None = None):
             except (ValueError, OSError):
                 self._reply(400)
                 return
-            with info.lock:
-                new = (str(data.get("name", ""))[:100], str(data.get("path", ""))[:300],
-                       str(data.get("class", ""))[:40])
-                lines = data.get("lines")
-                lines = int(lines) if isinstance(lines, (int, float)) and lines >= 0 else None
-                if new != (info.name, info.path, info.cls):
-                    log.info("Focused script: %s (%s lines)", new[1] or "(none)",
-                             "?" if lines is None else lines)
-                info.name, info.path, info.cls = new
-                info.lines = lines
-                info.place_name = str(data.get("place") or "")[:100]
-                n = data.get("collaborators")
-                info.collaborators = int(n) if isinstance(n, (int, float)) and 0 <= n < 1000 else 0
-                info.updated_at = time.time()
+            name = str(data.get("name", ""))[:100]
+            path = str(data.get("path", ""))[:300]
+            cls = str(data.get("class", ""))[:40]
+            lines = data.get("lines")
+            lines = int(lines) if isinstance(lines, (int, float)) and lines >= 0 else None
+            n = data.get("collaborators")
+            n = int(n) if isinstance(n, (int, float)) and 0 <= n < 1000 else 0
+            pid = data.get("placeId")
+            pid = int(pid) if isinstance(pid, (int, float)) and pid >= 0 else None
+            prev = info.snapshot(pid)
+            if (name, path, cls) != prev[:3]:
+                log.info("Focused script: %s (%s lines)", path or "(none)",
+                         "?" if lines is None else lines)
+            info.update(pid, (name, path, cls, lines, time.time(), n,
+                              str(data.get("place") or "")[:100]))
             self._reply(204)
 
         def log_message(self, *args):

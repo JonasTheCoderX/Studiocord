@@ -18,6 +18,9 @@ _DOC_TYPE = re.compile(r"\[FLog::RobloxDocManager\] Setting current doc to type 
 _TC_CONNECTED = "team create connect (connection accepted)"
 _TC_DISCONNECTED = "Handling team create disconnection event"
 _EXITING = "About to exit the application"
+# Studio logs when its window gains/loses focus (one process per Studio window).
+_FOCUS_IN = "[FLog::StudioApplicationState] State: Qt::ApplicationActive"
+_FOCUS_OUT = "[FLog::StudioApplicationState] State: Qt::ApplicationInactive"
 _TIMESTAMP = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?)Z,")
 
 # RobloxDocManager doc types
@@ -36,6 +39,8 @@ class StudioState:
     team_create: bool = False
     place_opened_at: float | None = None  # unix time
     exiting: bool = False
+    focused: bool = False             # this Studio's window has focus right now
+    focused_at: float = 0.0           # when it last got focus (log time, unix)
 
     @property
     def has_place(self):
@@ -73,6 +78,7 @@ def apply_line(state: StudioState, line: str) -> bool:
             new.place_id = int(ref)
         else:
             new.local_name = _place_name_from_path(ref)
+        new.focused, new.focused_at, new.exiting = state.focused, state.focused_at, state.exiting
         state.__dict__.update(new.__dict__)
         return True
 
@@ -108,9 +114,9 @@ def apply_line(state: StudioState, line: str) -> bool:
         if gs == "Null":
             # Place was closed -> back to the start page.
             changed = state.has_place or state.game_state != "Null"
-            exiting = state.exiting
+            keep = (state.exiting, state.focused, state.focused_at)
             state.__dict__.update(StudioState().__dict__)
-            state.exiting = exiting
+            state.exiting, state.focused, state.focused_at = keep
             return changed
         if gs != state.game_state:
             state.game_state = gs
@@ -131,6 +137,13 @@ def apply_line(state: StudioState, line: str) -> bool:
     if _TC_DISCONNECTED in line:
         changed = state.team_create
         state.team_create = False
+        return changed
+    if _FOCUS_IN in line:
+        state.focused, state.focused_at = True, _log_time(line) or state.focused_at
+        return True
+    if _FOCUS_OUT in line:
+        changed = state.focused
+        state.focused = False
         return changed
     if _EXITING in line:
         state.exiting = True

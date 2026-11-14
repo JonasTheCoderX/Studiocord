@@ -289,8 +289,10 @@ class Daemon:
         alive = [(c, st) for f, st, c in self.followers.values() if not st.exiting]
         if not alive:
             return None
-        # Prefer an instance with a place open, then the most recently active one.
-        return max(alive, key=lambda t: (t[1].has_place, t[0]))[1]
+        # The Studio window you're in (or were in last) wins; without focus info, an
+        # instance with a place open, then the one whose log changed last.
+        return max(alive, key=lambda t: (t[1].focused, t[1].focused_at,
+                                         t[1].has_place, t[0]))[1]
 
     def _drop_logs(self):
         for fol, _, _ in self.followers.values():
@@ -346,7 +348,7 @@ class Daemon:
             st.discord_error = ""
         else:
             st.discord = "detected" if discord_found else "not detected"
-        st.plugin_seen = time.time() - self.script.snapshot()[4] < PLUGIN_STALE_AFTER
+        st.plugin_seen = time.time() - self.script.last_seen() < PLUGIN_STALE_AFTER
         st.presence = short_text(self.sent)
         if st.key() != before:
             try:
@@ -389,7 +391,7 @@ class Daemon:
                 self._sync_logs(min(starts))
                 state = self._update_states()
                 act = (build_activity(state, self.lookup, self.cfg, min(starts),
-                                      self.script.snapshot()) if state else None)
+                                      self.script.snapshot(state.place_id)) if state else None)
                 self._send(None if self.paused else act)
             else:
                 if studio_was_running:

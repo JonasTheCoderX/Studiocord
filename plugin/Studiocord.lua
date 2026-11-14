@@ -72,7 +72,14 @@ end
 local function current()
 	local s = StudioService.ActiveScript
 	if s == nil then
-		return { name = "", path = "", class = "", collaborators = collaborators(), place = placeName() }
+		return {
+			name = "",
+			path = "",
+			class = "",
+			collaborators = collaborators(),
+			place = placeName(),
+			placeId = game.PlaceId,
+		}
 	end
 	return {
 		name = s.Name,
@@ -81,6 +88,7 @@ local function current()
 		lines = lineCount(s),
 		collaborators = collaborators(),
 		place = placeName(), -- the public API doesn't have it for private games
+		placeId = game.PlaceId, -- with several Studios open, tells them apart
 	}
 end
 
