@@ -3,10 +3,10 @@
 #   Linux:   ~/.config/studiocord/config.toml
 # If you edit it by hand, quit Studiocord (tray icon > Quit) and start it again.
 
-# Discord application shown as "Playing <name>". Default is Vinegar's "Roblox Studio"
-# app (it has the "place" and "script" small icons). Make your own at
-# https://discord.com/developers/applications and upload images named "place" and "script".
-client_id = "1159891020956323923"
+# Discord application shown as "Playing <name>". The default is Studiocord's own.
+# To use your own, create one at https://discord.com/developers/applications and add
+# the Rich Presence images listed in the README (studio, place, playtest, script, ...).
+client_id = "1571136022593409175"
 
 # Where Roblox Studio writes its logs. Empty = the usual place on this system
 # (%LOCALAPPDATA%\Roblox\logs on Windows, Vinegar's folder on Linux).

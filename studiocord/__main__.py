@@ -90,6 +90,11 @@ def _clip(s, n=128):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+# Rich Presence image names in the Discord application (README lists them).
+SCRIPT_ICONS = {"Script": "script", "LocalScript": "localscript", "ModuleScript": "modulescript"}
+DEFAULT_LARGE = "studio"
+
+
 def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started: float,
                    script: tuple | None = None):
     """Returns the Discord activity dict for the current Studio state (or None to hide)."""
@@ -97,7 +102,8 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
         if not cfg["show_idle"]:
             return None
         return {"details": "On the start page",
-                "timestamps": {"start": int(studio_started)}}
+                "timestamps": {"start": int(studio_started)},
+                "assets": {"large_image": DEFAULT_LARGE, "large_text": WATERMARK}}
 
     info = lookup.get(state.place_id, state.universe_id) if state.place_id else None
     if state.local_name:
@@ -114,7 +120,7 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
         details = "Editing a place"
 
     if state.game_state.startswith("Play"):
-        status, small, small_text = "Playtesting", "place", "Playtesting"
+        status, small, small_text = "Playtesting", "playtest", "Playtesting"
     elif state.doc_type == DOC_SCRIPT:
         status, small, small_text = "Editing a script", "script", "Scripting"
         if cfg["show_script_name"] and script and script[0]:
@@ -123,6 +129,7 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
             if cfg["show_line_count"] and lines_ is not None:
                 status += f" ({lines_:,} line{'' if lines_ == 1 else 's'})"
             small_text = f"{path_} ({cls_})" if cls_ else path_
+            small = SCRIPT_ICONS.get(cls_, "script")
     else:
         status, small, small_text = "Building", "place", "Building"
     if cfg["show_team_create"] and state.team_create:
@@ -134,10 +141,15 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
         "timestamps": {"start": int(state.place_opened_at or studio_started)},
         "assets": {"small_image": small, "small_text": small_text},
     }
+    # Big image: the game's icon when we have one, otherwise Roblox Studio's.
+    # Its hover text is the only place the watermark shows up.
     if cfg["show_place_name"] and info and info.icon_url and state.published:
         act["assets"]["large_image"] = info.icon_url
-        # Hover text of the place icon; the watermark only shows up there.
         act["assets"]["large_text"] = _clip(f"{name or 'Roblox Studio'} · {WATERMARK}")
+    else:
+        act["assets"]["large_image"] = DEFAULT_LARGE
+        act["assets"]["large_text"] = _clip(f"{name} · {WATERMARK}" if cfg["show_place_name"] and name
+                                            else WATERMARK)
     if cfg["show_button"] and cfg["show_place_name"] and state.published and info and info.public_url:
         act["buttons"] = [{"label": "View on Roblox", "url": info.public_url}]
     return act
@@ -147,8 +159,12 @@ def describe(act):
     if act is None:
         return "(no presence)"
     s = f"{act.get('details')} | {act.get('state', '')}"
-    if "large_image" in act.get("assets", {}):
-        s += " [icon]"
+    large = act.get("assets", {}).get("large_image")
+    if large:
+        s += " [icon]" if large.startswith("http") else f" [{large}]"
+    small = act.get("assets", {}).get("small_image")
+    if small:
+        s += f" ({small})"
     if act.get("buttons"):
         s += f" [button → {act['buttons'][0]['url']}]"
     return s

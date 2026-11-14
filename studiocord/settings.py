@@ -7,9 +7,9 @@ import tomllib
 from . import system
 
 DEFAULTS = {
-    # Discord application whose name/icon is shown ("Playing <name>").
-    # Default: Vinegar's own "Roblox Studio" app, which has the "place"/"script" images.
-    "client_id": "1159891020956323923",
+    # Discord application whose name/icon is shown ("Playing <name>"). It needs the
+    # Rich Presence images listed in the README.
+    "client_id": "1571136022593409175",
     "logs_dir": "",              # empty = Studio's default for this OS
     "show_place_name": True,     # False = just "Editing a place", no name or icon
     "show_button": True,         # "View on Roblox" button for published places
@@ -24,7 +24,7 @@ DEFAULTS = {
 
 # Comments written above each key when saving, so the file stays readable.
 _COMMENTS = {
-    "client_id": "Discord application shown as \"Playing <name>\". Default: Vinegar's \"Roblox Studio\" app.",
+    "client_id": "Discord application shown as \"Playing <name>\" (the default is Studiocord's own).",
     "logs_dir": "Where Roblox Studio writes its logs. Empty = the usual place on this system.",
     "show_place_name": "false = \"Editing a place\", no name/icon/button",
     "show_button": "\"View on Roblox\" button for published places",

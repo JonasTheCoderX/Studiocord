@@ -85,6 +85,22 @@ Studiocord checks every 15 seconds that the plugin is still there and up to date
 it back if it was deleted or Studio was reinstalled. Studio loads a newly added plugin
 right away, but an updated plugin only takes effect after restarting Studio.
 
+## Discord application
+
+Studiocord shows up as its own Discord application (the name after "Playing"). To use
+your own instead, create one at https://discord.com/developers/applications, put its
+Application ID into Settings → Advanced, and upload these images under
+*Rich Presence → Art Assets* (at least 512×512, names exactly as listed):
+
+| Name           | Used for                                                      |
+|----------------|---------------------------------------------------------------|
+| `studio`       | big image when there's no game icon (start page, local files) |
+| `place`        | small image while building                                    |
+| `playtest`     | small image while playtesting                                 |
+| `script`       | small image while editing a Script                            |
+| `localscript`  | small image while editing a LocalScript                       |
+| `modulescript` | small image while editing a ModuleScript                      |
+
 ## Settings file
 
 Everything in the settings window is stored in `config.toml`
