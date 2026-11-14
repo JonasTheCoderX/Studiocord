@@ -18,6 +18,11 @@ def _get(url):
         return json.load(r)
 
 
+def _is_placeholder(name: str) -> bool:
+    """Roblox's stand-ins like "[TITLE UNAVAILABLE]" or "[ Content Deleted ]"."""
+    return name.startswith("[") and name.endswith("]")
+
+
 class PlaceInfo:
     def __init__(self, name=None, icon_url=None, universe_id=None, public_url=None):
         self.name, self.icon_url = name, icon_url
@@ -52,8 +57,14 @@ class PlaceLookup:
             if universe_id:
                 games = _get(f"https://games.roblox.com/v1/games?universeIds={universe_id}").get("data") or []
                 if games:
-                    info.name = games[0].get("name")
-                    info.public_url = f"https://www.roblox.com/games/{games[0].get('rootPlaceId', place_id)}"
+                    name = (games[0].get("name") or "").strip()
+                    root = games[0].get("rootPlaceId") or 0
+                    # Games that aren't public come back as "[TITLE UNAVAILABLE]" with
+                    # rootPlaceId 0: no usable name, and no page to link to.
+                    if name and not _is_placeholder(name):
+                        info.name = name
+                    if root and not _is_placeholder(name):
+                        info.public_url = f"https://www.roblox.com/games/{root}"
                 icons = _get("https://thumbnails.roblox.com/v1/games/icons?universeIds="
                              f"{universe_id}&size=512x512&format=Png&isCircular=false").get("data") or []
                 if icons and icons[0].get("state") == "Completed":

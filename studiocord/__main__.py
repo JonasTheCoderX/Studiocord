@@ -110,10 +110,12 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
     if state.local_name:
         name = state.local_name
     elif not state.published:
-        base = info.name if info and info.name else None
+        base = info.name if info and info.name else None  # the template's name
         name = f"a new place ({base})" if base else "a new place"
     else:
-        name = info.name if info and info.name else None
+        # Public title if Roblox shares it, else the name Studio shows (private games).
+        studio_name = script[6] if script and len(script) > 6 else ""
+        name = (info.name if info and info.name else None) or studio_name or None
 
     if cfg["show_place_name"] and name:
         details = f"Editing {name}"
