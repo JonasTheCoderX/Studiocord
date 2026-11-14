@@ -77,10 +77,11 @@ settings window opens instead.
 ## Updates
 
 Studiocord checks GitHub for a new release shortly after it starts and then twice a day.
-When there is one, you get a notification: click it (or *Update available* in the tray
-menu) and Studiocord downloads the new installer and runs it. It restarts on the new
-version by itself. You can turn the check and notification off, or include pre-releases,
-in Settings → Updates; *Check now* (also in the tray menu) checks right away.
+When there is one, a notification tells you, and the tray menu shows *Update available*.
+To install it, open the settings (tray icon → *Settings*, or *Update available*) and click
+**Install update** under *Updates*: Studiocord downloads the new installer, runs it, and
+restarts on the new version by itself. There you can also turn the check and
+notification off, include pre-releases, or *Check now*.
 
 ## Script names
 

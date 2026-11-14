@@ -96,10 +96,11 @@ def make_icon(colour: str | None = None) -> QIcon:
 # --- settings window ---------------------------------------------------------------------
 
 class SettingsDialog(QDialog):
-    def __init__(self, daemon, check_now=None, parent=None):
+    def __init__(self, daemon, check_now=None, install_update=None, parent=None):
         super().__init__(parent)
         self.daemon = daemon
         self.check_now = check_now
+        self.install_update = install_update
         self.setWindowTitle("Studiocord settings")
         self.setWindowIcon(make_icon())
         self.setMinimumWidth(480)
@@ -167,7 +168,13 @@ class SettingsDialog(QDialog):
         self.update_label.setWordWrap(True)
         check_btn = QPushButton("Check now")
         check_btn.clicked.connect(self._check_now)
+        self.install_btn = QPushButton("Install update")
+        self.install_btn.setDefault(False)
+        self.install_btn.setAutoDefault(False)
+        self.install_btn.clicked.connect(lambda: self.install_update and self.install_update())
+        self.install_btn.hide()
         row.addWidget(self.update_label, 1)
+        row.addWidget(self.install_btn)
         row.addWidget(check_btn)
         v.addLayout(row)
         root.addWidget(box)
@@ -236,6 +243,11 @@ class SettingsDialog(QDialog):
 
     def set_update_text(self, text):
         self.update_label.setText(text)
+
+    def set_install_button(self, label, visible=True, enabled=True):
+        self.install_btn.setText(label)
+        self.install_btn.setVisible(visible)
+        self.install_btn.setEnabled(enabled)
 
     def _browse_logs(self):
         d = QFileDialog.getExistingDirectory(self, "Roblox Studio logs folder",
@@ -308,6 +320,7 @@ class Tray:
         self.dialog = None
         self.release = None        # newer version found by the updater
         self.downloading = False
+        self.update_text = f"You have version {__version__}."
 
         self.bridge = Bridge()
         self.bridge.changed.connect(self.refresh)
@@ -323,7 +336,7 @@ class Tray:
         menu = QMenu()
         title = menu.addAction(f"Studiocord {__version__}")
         title.setEnabled(False)
-        self.update_action = menu.addAction("", self.install_update)
+        self.update_action = menu.addAction("", self.open_settings)  # install is in the settings
         self.update_action.setVisible(False)
         menu.addSeparator()
         self.headline = menu.addAction("")
@@ -393,8 +406,8 @@ class Tray:
 
     def _update_checked(self, rel, err, manual):
         if err:
-            text = "Couldn't check for updates."
-            if manual:
+            text = f"Couldn't check for updates ({err})."
+            if manual and not (self.dialog and self.dialog.isVisible()):
                 self.tray.showMessage("Studiocord", f"{text}\n{err}", QSystemTrayIcon.Warning)
         elif rel is None:
             text = f"You have the newest version ({__version__})."
@@ -402,21 +415,42 @@ class Tray:
                 self.tray.showMessage("Studiocord", text, QSystemTrayIcon.Information)
         else:
             self.release = rel
-            how = "install" if updater.can_self_update() else "download"
-            text = f"Version {rel.name} is available."
-            self.update_action.setText(f"Update available: {rel.name} ({how})")
+            text = f"Version {rel.name} is available (you have {__version__})."
+            self.update_action.setText(f"Update available: {rel.name}…")
             self.update_action.setVisible(True)
-            if manual or not updater.already_notified(rel):
+            # The notification only informs: clicking notifications doesn't work on every
+            # desktop (KDE ignores it), so installing happens in the settings window.
+            if (manual or not updater.already_notified(rel)) and not (self.dialog and self.dialog.isVisible()):
                 self.tray.showMessage("Studiocord update available",
                                       f"Version {rel.name} is out (you have {__version__}). "
-                                      f"Click here to {how} it.", QSystemTrayIcon.Information)
+                                      "Open Studiocord's settings to install it.",
+                                      QSystemTrayIcon.Information)
                 updater.mark_notified(rel)
-        if self.dialog:
-            self.dialog.set_update_text(text)
+        self.update_text = text
+        self._sync_dialog_update()
+
+    def _install_label(self):
+        if not self.release:
+            return None
+        return ("Install update" if updater.can_self_update() and self.release.download_url
+                else "Open download page")
+
+    def _sync_dialog_update(self):
+        """Show the current update state in the settings window (if it exists)."""
+        if not self.dialog:
+            return
+        self.dialog.set_update_text(self.update_text)
+        label = self._install_label()
+        if label is None:
+            self.dialog.set_install_button("", visible=False)
+        elif self.downloading:
+            self.dialog.set_install_button("Installing…", enabled=False)
+        else:
+            self.dialog.set_install_button(label)
 
     def _message_clicked(self):
-        if self.release and not self.downloading:
-            self.install_update()
+        if self.release:
+            self.open_settings()
 
     def install_update(self):
         rel = self.release
@@ -428,7 +462,8 @@ class Tray:
         self.downloading = True
         self.update_action.setEnabled(False)
         self.update_action.setText(f"Downloading {rel.name}…")
-        self.tray.showMessage("Studiocord", f"Downloading {rel.name}…", QSystemTrayIcon.Information)
+        self.update_text = f"Downloading {rel.name}…"
+        self._sync_dialog_update()
 
         def work():
             try:
@@ -442,28 +477,37 @@ class Tray:
     def _update_progress(self, pct):
         if self.release and pct >= 0:
             self.update_action.setText(f"Downloading {self.release.name}… {pct}%")
+            self.update_text = f"Downloading {self.release.name}… {pct}%"
+            self._sync_dialog_update()
 
     def _update_downloaded(self, path, err):
         self.downloading = False
         self.update_action.setEnabled(True)
         if err or path is None:
-            self.update_action.setText(f"Update available: {self.release.name} (try again)")
-            self.tray.showMessage("Studiocord", f"The update download failed:\n{err}",
-                                  QSystemTrayIcon.Warning)
+            self.update_action.setText(f"Update available: {self.release.name}…")
+            self.update_text = f"The download failed: {err}"
+            self._sync_dialog_update()
             return
         self.update_action.setText(f"Installing {self.release.name}…")
+        self.update_text = (f"Installing {self.release.name}… Studiocord restarts by itself "
+                            "when it's done.")
+        self.downloading = True  # keep the button disabled while setup takes over
+        self._sync_dialog_update()
         try:
             updater.run_installer(path)  # it closes this copy and starts the new one
         except OSError as e:
-            self.tray.showMessage("Studiocord", f"Couldn't start the update:\n{e}",
-                                  QSystemTrayIcon.Warning)
+            self.downloading = False
+            self.update_text = f"Couldn't start the update: {e}"
+            self._sync_dialog_update()
 
     def open_settings(self):
         if self.dialog is None:
             self.dialog = SettingsDialog(
-                self.daemon, lambda pre: self.check_for_updates(manual=True, include_prereleases=pre))
+                self.daemon, lambda pre: self.check_for_updates(manual=True, include_prereleases=pre),
+                self.install_update)
         else:
             self.dialog._load(self.daemon.cfg)
+        self._sync_dialog_update()
         self.dialog.show()
         self.dialog.raise_()
         self.dialog.activateWindow()
