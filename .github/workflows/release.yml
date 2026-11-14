@@ -53,7 +53,10 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "studiocord.exe --diagnose failed ($($p.ExitCode))" }
           $env:QT_QPA_PLATFORM = "offscreen"
           $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--gui-selftest" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "studiocord.exe --gui-selftest failed ($($p.ExitCode))" }
+          if ($p.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA\Studiocord\crash.log" -ErrorAction SilentlyContinue
+            throw "studiocord.exe --gui-selftest failed ($($p.ExitCode))"
+          }
           Get-Content "$env:LOCALAPPDATA\Studiocord\studiocord.log" -ErrorAction SilentlyContinue
 
       - name: Build Studiocord-Setup.exe

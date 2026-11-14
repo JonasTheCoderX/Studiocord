@@ -458,9 +458,18 @@ def _setup_logging(verbose):
 
 
 def main():
-    if sys.stderr is not None:  # print a traceback if Qt or ctypes ever crash hard
-        import faulthandler
+    # If Qt or ctypes ever crash hard, record where. Windowed builds have no stderr,
+    # so they write it next to the log file instead.
+    import faulthandler
+    if sys.stderr is not None:
         faulthandler.enable()
+    elif system.log_file() is not None:
+        try:
+            crash = system.log_file().with_name("crash.log")
+            crash.parent.mkdir(parents=True, exist_ok=True)
+            faulthandler.enable(open(crash, "a", encoding="utf-8"))  # noqa: SIM115 - kept open
+        except OSError:
+            pass
     ap = argparse.ArgumentParser(prog="studiocord", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--headless", action="store_true", help="no tray icon or windows")

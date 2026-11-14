@@ -73,6 +73,14 @@ menu, for the **settings window**: what to show on Discord, start at login, and 
 status. On desktops without a tray (e.g. GNOME without the AppIndicator extension), the
 settings window opens instead.
 
+## Updates
+
+Studiocord checks GitHub for a new release shortly after it starts and then twice a day.
+When there is one, you get a notification: click it (or *Update available* in the tray
+menu) and Studiocord downloads the new installer and runs it. It restarts on the new
+version by itself. You can turn the check and notification off, or include pre-releases,
+in Settings → Updates; *Check now* (also in the tray menu) checks right away.
+
 ## Script names
 
 Studio doesn't log which script you're editing, so Studiocord puts a small helper plugin,

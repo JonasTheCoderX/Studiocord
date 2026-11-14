@@ -18,6 +18,8 @@ DEFAULTS = {
     "show_line_count": True,     # "Editing Main (120 lines)"; needs the Studio plugin
     "show_idle": True,           # show presence on the start page (no place open)
     "auto_install_plugin": True, # put the plugin back if it is missing/outdated
+    "check_updates": True,       # look for new versions and show a notification
+    "include_prereleases": False,
     "plugin_port": 47231,
     "poll_seconds": 1.0,
 }
@@ -33,6 +35,8 @@ _COMMENTS = {
     "show_line_count": "\"Editing Main (120 lines)\"",
     "show_idle": "show \"On the start page\" when no place is open",
     "auto_install_plugin": "put the Studio plugin back if it's deleted or Studio is reinstalled",
+    "check_updates": "look for new versions on GitHub and show a notification",
+    "include_prereleases": "also offer pre-release (test) versions",
     "plugin_port": "must match the URL in the Studio plugin",
     "poll_seconds": "how often to check Studio's log",
 }

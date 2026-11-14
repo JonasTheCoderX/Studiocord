@@ -57,6 +57,8 @@ Name: "{userprograms}\Studiocord"; Filename: "{app}\studiocord.exe"; Comment: "D
 
 [Run]
 Filename: "{app}\studiocord.exe"; Description: "Launch Studiocord"; Flags: nowait postinstall runasoriginaluser
+; Silent install = an update started from Studiocord itself: start it again quietly.
+Filename: "{app}\studiocord.exe"; Parameters: "--autostart"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallDelete]
 ; The Studio plugin it put in place, and its own log.
