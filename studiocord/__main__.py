@@ -1,16 +1,19 @@
-"""Studiocord: Discord Rich Presence for Roblox Studio running under Vinegar.
+"""Studiocord: Discord Rich Presence for Roblox Studio (Windows, and Linux via Vinegar).
 
 Runs forever in the background. While Roblox Studio runs, it follows Studio's own
 log files and shows what you're doing on Discord. When Studio closes, it clears it.
 
-    python3 -m studiocord               run (normally via the systemd user service)
-    python3 -m studiocord --dry-run     print presence instead of sending it to Discord
-    python3 -m studiocord --replay LOG  replay a Studio log file and print each presence
+    studiocord                 run (normally started at login)
+    studiocord --dry-run       print presence instead of sending it to Discord
+    studiocord --replay LOG    replay a Studio log file and print each presence
+    studiocord --diagnose      show what Studiocord can find on this computer
+    studiocord --install / --uninstall   (standalone Linux build)
 """
 
 import argparse
 import glob
 import logging
+import logging.handlers
 import os
 import signal
 import sys
@@ -20,26 +23,25 @@ from pathlib import Path
 
 from .discord_ipc import DiscordError, DiscordIPC
 from .roblox_api import PlaceLookup
-from . import WATERMARK, __version__, script_server
+from . import WATERMARK, __version__, script_server, system
 from .studio_log import DOC_SCRIPT, LogFollower, StudioState, apply_line
 
 log = logging.getLogger("studiocord")
 
-CONFIG_PATH = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "studiocord" / "config.toml"
+CONFIG_PATH = system.config_path()
 
 DEFAULTS = {
     # Discord application whose name/icon is shown ("Playing <name>").
     # Default: Vinegar's own "Roblox Studio" app, which has the "place"/"script" images.
     "client_id": "1159891020956323923",
-    "logs_dir": "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/appdata/Roblox/logs",
+    "logs_dir": "",              # empty = Studio's default for this OS
     "show_place_name": True,     # False = just "Editing a place", no name or icon
     "show_button": True,         # "View on Roblox" button for published places
     "show_team_create": True,
     "show_script_name": True,
-    "show_line_count": True,     # "Editing Main (120 lines)"    # needs the Studio plugin (install.sh puts it in place)
+    "show_line_count": True,     # "Editing Main (120 lines)"; both need the Studio plugin
     "plugin_port": 47231,
     "auto_install_plugin": True, # put the plugin back if it is missing/outdated
-    "vinegar_prefixes": "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/prefixes",
     "show_idle": True,           # show presence on the start page (no place open)
     "poll_seconds": 1.0,
 }
@@ -53,20 +55,20 @@ def load_config():
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH, "rb") as f:
             cfg.update(tomllib.load(f))
-    cfg["logs_dir"] = os.path.expanduser(cfg["logs_dir"])
+    cfg["logs_dir"] = os.path.expanduser(cfg["logs_dir"] or system.default_logs_dir())
     return cfg
 
 
 # --- Studio plugin upkeep --------------------------------------------------------
 
-PLUGIN_SRC = Path(__file__).resolve().parent.parent / "plugin" / "Studiocord.lua"
+PLUGIN_SRC = system.resource("plugin", "Studiocord.lua")
 LEGACY_PLUGIN_NAMES = ["Studio" + "RPC.lua"]
 
 
 def ensure_plugin(cfg):
-    """Copy the helper plugin into every Vinegar prefix that lacks it (or has an old copy).
+    """Copy the helper plugin into Studio's Plugins folder(s) if missing or outdated.
 
-    Covers Studio/Vinegar reinstalls (new prefix) and the file being deleted by hand.
+    Covers Studio/Vinegar reinstalls and the file being deleted by hand.
     Returns the list of paths that were (re)installed.
     """
     try:
@@ -75,12 +77,8 @@ def ensure_plugin(cfg):
         log.warning("Plugin source missing (%s); can't install it", e)
         return []
     installed = []
-    prefixes = os.path.expanduser(cfg["vinegar_prefixes"])
-    # The prefix's AppData/Local exists as soon as Vinegar has set Wine up.
-    for local in glob.glob(os.path.join(prefixes, "*", "drive_c", "users", "*", "AppData", "Local")):
-        if os.path.basename(os.path.dirname(os.path.dirname(local))) == "Public":
-            continue
-        dst = Path(local) / "Roblox" / "Plugins" / "Studiocord.lua"
+    for plugins in system.plugin_dirs():
+        dst = plugins / "Studiocord.lua"
         for old_name in LEGACY_PLUGIN_NAMES:  # from before the rename
             try:
                 (dst.parent / old_name).unlink()
@@ -101,42 +99,6 @@ def ensure_plugin(cfg):
         except OSError as e:
             log.warning("Couldn't install plugin to %s: %s", dst, e)
     return installed
-
-
-# --- Studio process detection ----------------------------------------------
-
-def _boot_time():
-    with open("/proc/stat") as f:
-        for line in f:
-            if line.startswith("btime "):
-                return int(line.split()[1])
-    return 0
-
-
-_BOOT = _boot_time()
-_TICKS = os.sysconf("SC_CLK_TCK")
-
-
-def studio_start_times():
-    """Unix start times of all running RobloxStudioBeta.exe processes."""
-    starts = []
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                cmd = f.read().lower()
-            if b"robloxstudiobeta.exe" not in cmd or b"crashhandler" in cmd:
-                continue
-            # Skip the bwrap/vinegar wrappers; the Wine process is the real one.
-            if cmd.startswith((b"/usr/bin/bwrap", b"vinegar")):
-                continue
-            with open(f"/proc/{pid}/stat") as f:
-                fields = f.read().rsplit(")", 1)[1].split()
-            starts.append(_BOOT + int(fields[19]) / _TICKS)
-        except (OSError, IndexError, ValueError):
-            continue
-    return starts
 
 
 # --- presence building -------------------------------------------------------
@@ -306,6 +268,10 @@ class Daemon:
         log.info("%s v%s - watching for Roblox Studio (logs: %s)", WATERMARK, __version__,
                  self.cfg["logs_dir"])
         if self.cfg["show_script_name"]:
+            # Our port doubles as a single-instance lock (autostart + manual start).
+            if script_server.port_in_use(self.cfg["plugin_port"]):
+                log.info("Studiocord is already running; exiting")
+                return
             script_server.start(self.script, self.cfg["plugin_port"])
         studio_was_running = False
         last_proc_scan, starts = 0.0, []
@@ -317,7 +283,7 @@ class Daemon:
                 ensure_plugin(self.cfg)
                 last_plugin_check = now
             if now - last_proc_scan >= 2:
-                starts, last_proc_scan = studio_start_times(), now
+                starts, last_proc_scan = system.studio_start_times(), now
             if starts:
                 if not studio_was_running:
                     log.info("Roblox Studio started")
@@ -365,17 +331,62 @@ def replay(path, cfg):
     print("final (with lookups):", describe(build_activity(st, lookup, cfg, 0)))
 
 
+def diagnose(cfg):
+    """Print what Studiocord sees; handy for bug reports (and the CI smoke test)."""
+    print(f"{WATERMARK} v{__version__} on {sys.platform}, frozen={system.FROZEN}")
+    print("config:", CONFIG_PATH, "(exists)" if CONFIG_PATH.exists() else "(defaults)")
+    print("logs dir:", cfg["logs_dir"], "(exists)" if os.path.isdir(cfg["logs_dir"]) else "(missing)")
+    logs = glob.glob(os.path.join(cfg["logs_dir"], "*_Studio_*_last.log"))
+    print("studio logs:", len(logs))
+    print("studio processes:", len(system.studio_start_times()))
+    print("plugin source:", PLUGIN_SRC, "(ok)" if PLUGIN_SRC.exists() else "(MISSING)")
+    print("plugin folders:", [str(p) for p in system.plugin_dirs()] or "none found")
+    print("discord endpoints:", system.discord_endpoints() or "none found")
+    return 0 if PLUGIN_SRC.exists() else 1
+
+
+def _setup_logging(verbose):
+    handlers = []
+    if sys.stdout is not None:  # windowed Windows builds have no console
+        handlers.append(logging.StreamHandler(sys.stdout))
+    path = system.log_file()
+    if path is not None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            handlers.append(logging.handlers.RotatingFileHandler(
+                path, maxBytes=1_000_000, backupCount=1, encoding="utf-8"))
+        except OSError:
+            pass
+    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S", handlers=handlers or [logging.NullHandler()])
+
+
 def main():
     ap = argparse.ArgumentParser(prog="studiocord", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true", help="print presence, don't touch Discord")
     ap.add_argument("--replay", metavar="LOG", help="replay a Studio log file and exit")
+    ap.add_argument("--diagnose", action="store_true", help="show what Studiocord finds, then exit")
+    ap.add_argument("--install", action="store_true", help="(Linux build) install and start")
+    ap.add_argument("--uninstall", action="store_true", help="(Linux build) remove Studiocord")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--version", action="version", version=f"{WATERMARK}, v{__version__}")
     args = ap.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
-                        format="%(levelname)s %(name)s: %(message)s", stream=sys.stdout)
+
+    if not system.IS_WINDOWS:
+        from . import installer
+        if args.uninstall:
+            sys.exit(installer.uninstall())
+        # The downloaded Linux build installs itself when started from anywhere else.
+        if args.install or (system.FROZEN and len(sys.argv) == 1
+                            and not installer.is_installed_copy()):
+            sys.exit(installer.install())
+
+    _setup_logging(args.verbose)
     cfg = load_config()
+    if args.diagnose:
+        sys.exit(diagnose(cfg))
     if args.replay:
         replay(args.replay, cfg)
         return

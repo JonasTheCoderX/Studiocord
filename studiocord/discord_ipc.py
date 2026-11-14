@@ -1,7 +1,8 @@
-"""Minimal Discord Rich Presence client over the local IPC socket (no dependencies).
+"""Minimal Discord Rich Presence client over Discord's local IPC (no dependencies).
 
-Protocol: each frame is <opcode:u32le><length:u32le><json>. Opcode 0 = handshake,
-1 = frame (commands), 2 = close.
+Linux: Unix socket ($XDG_RUNTIME_DIR/discord-ipc-N); Windows: named pipe
+\\\\.\\pipe\\discord-ipc-N. Each frame is <opcode:u32le><length:u32le><json>.
+Opcode 0 = handshake, 1 = frame (commands), 2 = close.
 """
 
 import json
@@ -11,31 +12,45 @@ import socket
 import struct
 import uuid
 
+from .system import IS_WINDOWS, discord_endpoints
+
 log = logging.getLogger("discord")
 
 OP_HANDSHAKE, OP_FRAME, OP_CLOSE = 0, 1, 2
-
-# Where various Discord builds put their socket, relative to $XDG_RUNTIME_DIR.
-_SOCKET_DIRS = [
-    "",                                          # native Discord / Vesktop native
-    "app/com.discordapp.Discord",                # Flatpak Discord
-    ".flatpak/com.discordapp.Discord/xdg-run",
-    ".flatpak/dev.vencord.Vesktop/xdg-run",      # Flatpak Vesktop
-    "snap.discord",                              # Snap Discord
-]
 
 
 class DiscordError(Exception):
     pass
 
 
-def _candidate_sockets():
-    base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    for d in _SOCKET_DIRS:
-        for i in range(10):
-            path = os.path.join(base, d, f"discord-ipc-{i}")
-            if os.path.exists(path):
-                yield path
+class _Pipe:
+    """Windows named pipe with the bits of the socket API we use."""
+
+    def __init__(self, path):
+        self.f = open(path, "r+b", buffering=0)
+
+    def sendall(self, data):
+        self.f.write(data)
+        self.f.flush()
+
+    def recv(self, n):
+        return self.f.read(n)
+
+    def close(self):
+        self.f.close()
+
+
+def _open(path):
+    if IS_WINDOWS:
+        return _Pipe(path)
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(5)
+    try:
+        s.connect(path)
+    except OSError:
+        s.close()
+        raise
+    return s
 
 
 class DiscordIPC:
@@ -49,14 +64,11 @@ class DiscordIPC:
         return self.sock is not None
 
     def connect(self):
-        """Try every known socket; raise DiscordError if Discord isn't reachable."""
+        """Try every known endpoint; raise DiscordError if Discord isn't reachable."""
         last_err = None
-        for path in _candidate_sockets():
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            s.settimeout(5)
+        for path in discord_endpoints():
             try:
-                s.connect(path)
-                self.sock = s
+                self.sock = _open(path)
                 self._send(OP_HANDSHAKE, {"v": 1, "client_id": self.client_id})
                 op, data = self._recv()
                 if op == OP_CLOSE or data.get("evt") != "READY":
@@ -68,7 +80,7 @@ class DiscordIPC:
             except (OSError, DiscordError, ValueError) as e:
                 last_err = e
                 self._drop()
-        raise DiscordError(f"Discord not reachable ({last_err or 'no socket found'})")
+        raise DiscordError(f"Discord not reachable ({last_err or 'not running?'})")
 
     def set_activity(self, activity: dict | None):
         """Set (or clear, with None) the presence. Raises DiscordError on failure."""
@@ -105,7 +117,7 @@ class DiscordIPC:
         data = json.dumps(payload).encode()
         try:
             self.sock.sendall(struct.pack("<II", op, len(data)) + data)
-        except (OSError, AttributeError) as e:
+        except (OSError, AttributeError, ValueError) as e:
             self._drop()
             raise DiscordError(f"send failed: {e}") from e
 
@@ -122,6 +134,6 @@ class DiscordIPC:
         try:
             op, length = struct.unpack("<II", self._recv_exact(8))
             return op, json.loads(self._recv_exact(length) or b"{}")
-        except (OSError, AttributeError, struct.error) as e:
+        except (OSError, AttributeError, ValueError, struct.error) as e:
             self._drop()
             raise DiscordError(f"receive failed: {e}") from e

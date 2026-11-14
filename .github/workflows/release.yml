@@ -1,0 +1,125 @@
+# Builds Studiocord for Windows and Linux (no Python needed to run either) and
+# publishes them as a GitHub *pre-release* named after __version__ in
+# studiocord/__init__.py (currently staying at 1.0.0 until the full release).
+#
+#   Actions tab -> "Build & release" -> Run workflow -> publish: true
+#     rebuilds and replaces the pre-release for the current version
+#   git tag v1.2.3 && git push origin v1.2.3
+#     same, for an explicit version tag
+# Make it a full release later with:
+#   gh release edit v1.0.0 --prerelease=false --latest
+name: Build & release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish (replace) the pre-release for the current version"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version from tag
+        shell: bash
+        run: |
+          # A version tag wins; otherwise use the version in the code.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"
+          else V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' studiocord/__init__.py); fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          sed -i "s/^__version__ = .*/__version__ = \"$V\"/" studiocord/__init__.py
+
+      - name: Build studiocord.exe
+        run: |
+          pip install pyinstaller
+          python build.py
+
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--diagnose" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "studiocord.exe --diagnose failed ($($p.ExitCode))" }
+          Get-Content "$env:LOCALAPPDATA\Studiocord\studiocord.log" -ErrorAction SilentlyContinue
+
+      - name: Build Studiocord-Setup.exe
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$env:VERSION" installer\studiocord.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Studiocord-Setup.exe
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version from tag
+        run: |
+          # A version tag wins; otherwise use the version in the code.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"
+          else V=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' studiocord/__init__.py); fi
+          sed -i "s/^__version__ = .*/__version__ = \"$V\"/" studiocord/__init__.py
+
+      - name: Build Studiocord-Installer-Linux
+        run: |
+          pip install pyinstaller
+          python build.py
+
+      - name: Self-test
+        run: |
+          dist/Studiocord-Installer-Linux --version
+          dist/Studiocord-Installer-Linux --diagnose
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/Studiocord-Installer-Linux
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.publish
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then TAG="$GITHUB_REF_NAME"
+          else TAG="v$(sed -n 's/^__version__ = "\(.*\)"/\1/p' studiocord/__init__.py)"; fi
+          chmod +x out/Studiocord-Installer-Linux
+          # Same version again (manual publish): replace the old pre-release and move
+          # its tag to this commit. A full (non-pre) release is never touched.
+          if gh release view "$TAG" --json isPrerelease --jq .isPrerelease 2>/dev/null | grep -q false; then
+            echo "::error::$TAG is already a full release; bump __version__ first"; exit 1
+          fi
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            gh release delete "$TAG" --cleanup-tag --yes 2>/dev/null || true
+          fi
+          gh release create "$TAG" out/* --target "$GITHUB_SHA" --prerelease \
+            --title "Studiocord $TAG (pre-release)" --generate-notes

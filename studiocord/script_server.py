@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,6 +26,26 @@ class ScriptInfo:
     def snapshot(self):
         with self.lock:
             return self.name, self.path, self.cls, self.lines, self.updated_at
+
+
+class _Server(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second process bind the same port, which would
+    # break our single-instance check; there we want exclusive use instead.
+    allow_reuse_address = sys.platform != "win32"
+    daemon_threads = True
+
+    def server_bind(self):
+        if sys.platform == "win32":
+            import socket
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def port_in_use(port: int = PORT) -> bool:
+    import socket
+    with socket.socket() as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
 
 
 def start(info: ScriptInfo, port: int = PORT):
@@ -58,7 +79,7 @@ def start(info: ScriptInfo, port: int = PORT):
             pass  # keep the journal clean
 
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server = _Server(("127.0.0.1", port), Handler)
     except OSError as e:
         log.warning("Can't listen on 127.0.0.1:%d (%s); script names disabled", port, e)
         return None
