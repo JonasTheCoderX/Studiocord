@@ -41,7 +41,7 @@ jobs:
 
       - name: Build studiocord.exe
         run: |
-          pip install pyinstaller PySide6-Essentials
+          pip install pyinstaller PySide6-Essentials certifi
           python build.py
 
       - name: Self-test
@@ -90,7 +90,7 @@ jobs:
 
       - name: Build Studiocord-Installer-Linux
         run: |
-          pip install pyinstaller PySide6-Essentials
+          pip install pyinstaller PySide6-Essentials certifi
           python build.py
 
       - name: Self-test

@@ -450,7 +450,10 @@ def diagnose(cfg):
     print("discord running:", system.discord_running(), system.discord_endpoints())
     print("display:", system.has_display(), "| gui toolkit:", _gui_available())
     print("log file:", system.log_file() or "stdout")
-    return 0 if PLUGIN_SRC.exists() else 1
+    print("ssl cert file:", os.environ.get("SSL_CERT_FILE") or "(Python default)")
+    ok, detail = system.https_works()
+    print("https:", "ok" if ok else "FAILED", detail)
+    return 0 if PLUGIN_SRC.exists() and ok else 1
 
 
 def _setup_logging(verbose):
@@ -471,6 +474,7 @@ def _setup_logging(verbose):
 
 
 def main():
+    system.fix_ssl_certificates()  # before anything talks HTTPS
     # If Qt or ctypes ever crash hard, record where. Windowed builds have no stderr,
     # so they write it next to the log file instead.
     import faulthandler

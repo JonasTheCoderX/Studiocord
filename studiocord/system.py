@@ -277,3 +277,45 @@ def child_env() -> dict:
         env.pop("LD_LIBRARY_PATH_ORIG", None)
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     return env
+
+
+# Where Linux distributions keep their trusted CA certificates.
+_CA_FILES = [
+    "/etc/ssl/certs/ca-certificates.crt",                # Debian, Ubuntu, Arch, Gentoo
+    "/etc/pki/tls/certs/ca-bundle.crt",                  # Fedora, RHEL, Bazzite
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", # Fedora (newer layout)
+    "/etc/ssl/ca-bundle.pem",                            # openSUSE
+    "/etc/ssl/cert.pem",                                 # Alpine, others
+]
+
+
+def fix_ssl_certificates():
+    """Make HTTPS work in the standalone Linux build on every distribution.
+
+    The bundled Python looks for CA certificates where the build machine (Ubuntu)
+    keeps them, so on e.g. Fedora every HTTPS request failed with
+    CERTIFICATE_VERIFY_FAILED. Point OpenSSL at this system's file, or at the copy
+    shipped with Studiocord (certifi) when none is found.
+    """
+    if IS_WINDOWS or not FROZEN or os.environ.get("SSL_CERT_FILE"):
+        return
+    for path in _CA_FILES:
+        if os.path.isfile(path):
+            os.environ["SSL_CERT_FILE"] = path
+            return
+    try:
+        import certifi
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+    except ImportError:
+        pass
+
+
+def https_works(url="https://api.github.com", timeout=8):
+    """(ok, detail) for a quick HTTPS request; used by --diagnose."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Studiocord"}),
+                                    timeout=timeout) as r:
+            return True, f"HTTP {r.status}"
+    except Exception as e:  # noqa: BLE001 - reported, not handled
+        return False, str(e)
