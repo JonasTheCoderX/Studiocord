@@ -1,0 +1,19 @@
+# Copy to ~/.config/studiocord/config.toml and change what you like.
+# Restart after editing:  systemctl --user restart studiocord
+
+# Discord application shown as "Playing <name>". Default is Vinegar's "Roblox Studio"
+# app (it has the "place" and "script" small icons). Make your own at
+# https://discord.com/developers/applications and upload images named "place" and "script".
+client_id = "1159891020956323923"
+
+logs_dir = "~/.var/app/org.vinegarhq.Vinegar/data/vinegar/appdata/Roblox/logs"
+
+show_place_name = true    # false = "Editing a place", no name/icon/button
+show_button = true        # "View on Roblox" button for published places
+show_team_create = true   # append "· Team Create" when connected
+show_script_name = true   # "Editing <ScriptName>"; needs plugin/Studiocord.lua in Studio's Plugins folder
+show_line_count = true    # "Editing Main (120 lines)"
+plugin_port = 47231       # must match URL in plugin/Studiocord.lua
+auto_install_plugin = true  # re-copy the plugin if it gets deleted or Studio/Vinegar is reinstalled
+show_idle = true          # show "On the start page" when no place is open
+poll_seconds = 1.0

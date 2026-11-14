@@ -1,0 +1,15 @@
+[Unit]
+Description=Studiocord - Discord Rich Presence for Roblox Studio (by JonasTheCoderX)
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=/usr/bin/python3 -m studiocord
+Environment=PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# The project lives on the NAS automount; if it isn't reachable yet, just retry.
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target
