@@ -50,10 +50,13 @@ jobs:
           $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--diagnose" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "studiocord.exe --diagnose failed ($($p.ExitCode))" }
           $env:QT_QPA_PLATFORM = "offscreen"
-          $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--gui-selftest" -Wait -PassThru
-          if ($p.ExitCode -ne 0) {
-            Get-Content "$env:LOCALAPPDATA\Studiocord\crash.log" -ErrorAction SilentlyContinue
-            throw "studiocord.exe --gui-selftest failed ($($p.ExitCode))"
+          # Several runs: an exit crash once only showed up now and then.
+          foreach ($i in 1..5) {
+            $p = Start-Process -FilePath dist\studiocord.exe -ArgumentList "--gui-selftest" -Wait -PassThru
+            if ($p.ExitCode -ne 0) {
+              Get-Content "$env:LOCALAPPDATA\Studiocord\crash.log" -ErrorAction SilentlyContinue
+              throw "studiocord.exe --gui-selftest failed on run $i ($($p.ExitCode))"
+            }
           }
           Get-Content "$env:LOCALAPPDATA\Studiocord\studiocord.log" -ErrorAction SilentlyContinue
 

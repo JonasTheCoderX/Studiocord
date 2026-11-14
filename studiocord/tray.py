@@ -484,6 +484,8 @@ def _hard_exit(code: int):
 
     Letting the interpreter destroy Qt objects in arbitrary order at exit can segfault
     (seen with PySide6 in the PyInstaller build), so flush everything and leave.
+    On Windows even os._exit() runs Qt's DLL unload code, which can crash with an
+    access violation; TerminateProcess ends the process without running it.
     """
     logging.shutdown()
     for f in (sys.stdout, sys.stderr):
@@ -491,6 +493,12 @@ def _hard_exit(code: int):
             f and f.flush()
         except Exception:
             pass
+    if sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        k32.GetCurrentProcess.restype = ctypes.c_void_p
+        k32.TerminateProcess.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+        k32.TerminateProcess(k32.GetCurrentProcess(), code & 0xFFFFFFFF)
     os._exit(code)
 
 
