@@ -46,10 +46,33 @@ local function collaborators()
 	return ok and #list or 0
 end
 
+-- The place's name. game.Name stays "Place1" for places opened from the cloud, so ask
+-- Roblox: inside Studio this request carries your login and works for private places.
+local DEFAULT_NAMES = { Place1 = true, Place = true, Game = true, [""] = true }
+local placeNames = {}
+
+local function placeName()
+	local id = game.PlaceId
+	if id ~= 0 and placeNames[id] == nil then
+		placeNames[id] = false -- asking; don't ask again in the meantime
+		task.spawn(function()
+			local ok, info = pcall(function()
+				return game:GetService("MarketplaceService"):GetProductInfo(id)
+			end)
+			placeNames[id] = (ok and type(info) == "table" and type(info.Name) == "string" and info.Name) or ""
+		end)
+	end
+	local known = placeNames[id]
+	if type(known) == "string" and known ~= "" then
+		return known
+	end
+	return DEFAULT_NAMES[game.Name] and "" or game.Name
+end
+
 local function current()
 	local s = StudioService.ActiveScript
 	if s == nil then
-		return { name = "", path = "", class = "", collaborators = collaborators(), place = game.Name }
+		return { name = "", path = "", class = "", collaborators = collaborators(), place = placeName() }
 	end
 	return {
 		name = s.Name,
@@ -57,7 +80,7 @@ local function current()
 		class = s.ClassName,
 		lines = lineCount(s),
 		collaborators = collaborators(),
-		place = game.Name, -- the place's name; the public API doesn't have it for private games
+		place = placeName(), -- the public API doesn't have it for private games
 	}
 end
 

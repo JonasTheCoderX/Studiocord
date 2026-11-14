@@ -115,6 +115,8 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
     else:
         # Public title if Roblox shares it, else the name Studio shows (private games).
         studio_name = script[6] if script and len(script) > 6 else ""
+        if studio_name in ("Place1", "Place", "Game"):  # Studio's defaults, not a real name
+            studio_name = ""
         name = (info.name if info and info.name else None) or studio_name or None
 
     if cfg["show_place_name"] and name:
