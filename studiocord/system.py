@@ -312,10 +312,14 @@ def fix_ssl_certificates():
 
 def https_works(url="https://api.github.com", timeout=8):
     """(ok, detail) for a quick HTTPS request; used by --diagnose."""
+    import urllib.error
     import urllib.request
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Studiocord"}),
                                     timeout=timeout) as r:
             return True, f"HTTP {r.status}"
+    except urllib.error.HTTPError as e:
+        # The server answered (e.g. 403 rate limit), so the secure connection works.
+        return True, f"HTTP {e.code} (connection ok)"
     except Exception as e:  # noqa: BLE001 - reported, not handled
         return False, str(e)
