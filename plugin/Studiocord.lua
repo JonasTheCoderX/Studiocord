@@ -11,6 +11,7 @@
 local HttpService = game:GetService("HttpService")
 local RunService = game:GetService("RunService")
 local StudioService = game:GetService("StudioService")
+local Players = game:GetService("Players")
 local ScriptEditorService = game:GetService("ScriptEditorService")
 
 -- Only the edit DataModel; playtest DataModels show "Playtesting" anyway.
@@ -39,12 +40,24 @@ local function lineCount(s)
 	return newlines + 1
 end
 
+-- In Team Create, every collaborator in the session (you included) is a Player here.
+local function collaborators()
+	local ok, list = pcall(Players.GetPlayers, Players)
+	return ok and #list or 0
+end
+
 local function current()
 	local s = StudioService.ActiveScript
 	if s == nil then
-		return { name = "", path = "", class = "" }
+		return { name = "", path = "", class = "", collaborators = collaborators() }
 	end
-	return { name = s.Name, path = s:GetFullName(), class = s.ClassName, lines = lineCount(s) }
+	return {
+		name = s.Name,
+		path = s:GetFullName(),
+		class = s.ClassName,
+		lines = lineCount(s),
+		collaborators = collaborators(),
+	}
 end
 
 local function send(force)
@@ -67,6 +80,12 @@ end
 
 StudioService:GetPropertyChangedSignal("ActiveScript"):Connect(function()
 	send(false)
+end)
+Players.PlayerAdded:Connect(function()
+	send(false)
+end)
+Players.PlayerRemoving:Connect(function()
+	task.defer(send, false) -- after the player is actually gone
 end)
 
 -- The script can be renamed while open; resend periodically so the daemon catches

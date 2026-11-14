@@ -14,6 +14,7 @@ DEFAULTS = {
     "show_place_name": True,     # False = just "Editing a place", no name or icon
     "show_button": True,         # "View on Roblox" button for published places
     "show_team_create": True,
+    "show_party": True,          # "3 of 3" + avatars of collaborators who also use Studiocord
     "show_script_name": True,    # needs the Studio plugin
     "show_line_count": True,     # "Editing Main (120 lines)"; needs the Studio plugin
     "show_idle": True,           # show presence on the start page (no place open)
@@ -31,6 +32,7 @@ _COMMENTS = {
     "show_place_name": "false = \"Editing a place\", no name/icon/button",
     "show_button": "\"View on Roblox\" button for published places",
     "show_team_create": "append \"· Team Create\" when connected",
+    "show_party": "show how many people are in the Team Create session (\"3 of 3\")",
     "show_script_name": "\"Editing <ScriptName>\" (uses the Studiocord Studio plugin)",
     "show_line_count": "\"Editing Main (120 lines)\"",
     "show_idle": "show \"On the start page\" when no place is open",

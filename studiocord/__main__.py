@@ -13,6 +13,7 @@ own log files and shows what you're doing on Discord. When Studio closes, it cle
 
 import argparse
 import glob
+import hashlib
 import logging
 import logging.handlers
 import os
@@ -150,6 +151,12 @@ def build_activity(state: StudioState, lookup: PlaceLookup, cfg, studio_started:
         act["assets"]["large_image"] = DEFAULT_LARGE
         act["assets"]["large_text"] = _clip(f"{name} · {WATERMARK}" if cfg["show_place_name"] and name
                                             else WATERMARK)
+    # Team Create session as a Discord party: "3 of 3", and collaborators who also run
+    # Studiocord share the party id, so Discord shows their avatars.
+    collaborators = script[5] if script and len(script) > 5 else 0
+    if cfg.get("show_party", True) and state.team_create and state.place_id and collaborators > 1:
+        pid = hashlib.sha256(f"studiocord-tc-{state.place_id}".encode()).hexdigest()[:32]
+        act["party"] = {"id": pid, "size": [collaborators, collaborators]}
     if cfg["show_button"] and cfg["show_place_name"] and state.published and info and info.public_url:
         act["buttons"] = [{"label": "View on Roblox", "url": info.public_url}]
     return act
@@ -165,6 +172,8 @@ def describe(act):
     small = act.get("assets", {}).get("small_image")
     if small:
         s += f" ({small})"
+    if act.get("party"):
+        s += " [party {0} of {1}]".format(*act["party"]["size"])
     if act.get("buttons"):
         s += f" [button → {act['buttons'][0]['url']}]"
     return s

@@ -131,6 +131,7 @@ class SettingsDialog(QDialog):
             ("show_script_name", "The script you're editing"),
             ("show_line_count", "The script's line count"),
             ("show_team_create", "When you're in Team Create"),
+            ("show_party", "Who's in the Team Create session (\"3 of 3\")"),
             ("show_idle", "A status while Studio is on its start page"),
         ]:
             cb = QCheckBox(text)

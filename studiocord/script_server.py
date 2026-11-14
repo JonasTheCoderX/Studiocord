@@ -28,17 +28,20 @@ class ScriptInfo:
         self.path = ""
         self.cls = ""
         self.lines = None
+        self.collaborators = 0  # people in the Team Create session (incl. you)
         self.updated_at = 0.0   # last time the plugin checked in
         self.lock = threading.Lock()
 
     def snapshot(self):
         with self.lock:
-            return self.name, self.path, self.cls, self.lines, self.updated_at
+            return (self.name, self.path, self.cls, self.lines, self.updated_at,
+                    self.collaborators)
 
     def clear(self):
         with self.lock:
             self.name = self.path = self.cls = ""
             self.lines = None
+            self.collaborators = 0
             self.updated_at = 0.0
 
 
@@ -110,6 +113,8 @@ def start(info: ScriptInfo, port: int = PORT, commands: dict | None = None):
                              "?" if lines is None else lines)
                 info.name, info.path, info.cls = new
                 info.lines = lines
+                n = data.get("collaborators")
+                info.collaborators = int(n) if isinstance(n, (int, float)) and 0 <= n < 1000 else 0
                 info.updated_at = time.time()
             self._reply(204)
 

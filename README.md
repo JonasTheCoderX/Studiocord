@@ -15,6 +15,7 @@ runs, it reads Studio's own log files and shows what you're doing:
 | Script tab focused            | Editing *Place name* · Editing *ScriptName* (*n* lines) |
 | Play / Run test               | Editing *Place name* · Playtesting                      |
 | Team Create connected         | … · Team Create                                         |
+| Others in your Team Create    | party "3 of 3", with avatars of those also using Studiocord |
 | Local `.rbxl` file            | Editing *file name*                                     |
 | New place from a template     | Editing a new place (Baseplate)                         |
 | Studio closed                 | presence cleared                                        |
