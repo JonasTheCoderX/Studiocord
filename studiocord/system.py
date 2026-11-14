@@ -257,3 +257,23 @@ def discord_running() -> bool:
             except OSError:
                 continue
     return False
+
+
+def child_env() -> dict:
+    """Environment for starting another Studiocord build (installer, new version).
+
+    A PyInstaller program passes its own temporary unpack folder on to programs it
+    starts (_PYI*/_MEI* variables, Qt paths). That folder is deleted when this copy
+    quits, and a child Studiocord then fails with "Failed to load Python DLL".
+    PYINSTALLER_RESET_ENVIRONMENT tells the child to set itself up from scratch.
+    """
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith(("_PYI", "_MEI", "QT_", "PYSIDE")) and k.upper() != "PYTHONPATH"}
+    if not IS_WINDOWS:
+        if "LD_LIBRARY_PATH_ORIG" in os.environ:
+            env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+        env.pop("LD_LIBRARY_PATH_ORIG", None)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env

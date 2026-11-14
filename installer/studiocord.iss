@@ -56,9 +56,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Name: "{userprograms}\Studiocord"; Filename: "{app}\studiocord.exe"; Comment: "Discord Rich Presence for Roblox Studio"
 
 [Run]
-Filename: "{app}\studiocord.exe"; Description: "Launch Studiocord"; Flags: nowait postinstall runasoriginaluser
+; Studiocord is always started through cmd with PYINSTALLER_RESET_ENVIRONMENT=1: when an
+; older Studiocord started this setup (update), its environment points at its own
+; temporary folder, which is gone once it quits ("Failed to load Python DLL").
+Filename: "{cmd}"; Parameters: "/C ""set PYINSTALLER_RESET_ENVIRONMENT=1&& start """" ""{app}\studiocord.exe"""""; Description: "Launch Studiocord"; Flags: nowait postinstall skipifsilent runhidden runasoriginaluser
 ; Silent install = an update started from Studiocord itself: start it again quietly.
-Filename: "{app}\studiocord.exe"; Parameters: "--autostart"; Flags: nowait runasoriginaluser; Check: WizardSilent
+Filename: "{cmd}"; Parameters: "/C ""set PYINSTALLER_RESET_ENVIRONMENT=1&& start """" ""{app}\studiocord.exe"" --autostart"""; Flags: nowait runhidden runasoriginaluser; Check: WizardSilent
 
 [UninstallDelete]
 ; The Studio plugin it put in place, and its own log.
@@ -74,7 +77,9 @@ begin
   // Ask nicely first, so it clears the Discord status; then make sure.
   Exe := ExpandConstant('{localappdata}\Programs\Studiocord\studiocord.exe');
   if FileExists(Exe) then
-    Exec(Exe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec(ExpandConstant('{cmd}'),
+         '/C "set PYINSTALLER_RESET_ENVIRONMENT=1&& "' + Exe + '" --quit"',
+         '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM studiocord.exe', '', SW_HIDE,
        ewWaitUntilTerminated, ResultCode);
 end;

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from . import WATERMARK, __version__, script_server, settings
-from .system import AUTOSTART_DESKTOP, config_path, plugin_dirs, resource, set_autostart
+from .system import AUTOSTART_DESKTOP, child_env, config_path, plugin_dirs, resource, set_autostart
 
 DATA = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
@@ -42,20 +42,7 @@ def is_installed() -> bool:
 
 
 def _clean_env():
-    """Environment for starting the installed copy from this (frozen) process.
-
-    Drops what PyInstaller and Qt set up for *this* process; it points into our own
-    temporary folder, which is deleted when the installer exits.
-    """
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("_PYI", "_MEI", "QT_", "PYSIDE")) and k not in ("PYTHONPATH",)}
-    if "LD_LIBRARY_PATH_ORIG" in os.environ:
-        env["LD_LIBRARY_PATH"] = os.environ["LD_LIBRARY_PATH_ORIG"]
-    else:
-        env.pop("LD_LIBRARY_PATH", None)
-    env.pop("LD_LIBRARY_PATH_ORIG", None)
-    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    return env
+    return child_env()
 
 
 def _systemctl(*args):

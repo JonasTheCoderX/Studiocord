@@ -101,11 +101,10 @@ def run_installer(path: Path):
     if system.IS_WINDOWS:
         # Silent setup: closes the running Studiocord, updates, starts it again.
         subprocess.Popen([str(path), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"],
-                         close_fds=True)
+                         close_fds=True, env=system.child_env())
     else:
-        from .installer import _clean_env
         path.chmod(0o755)
-        subprocess.Popen([str(path), "--install"], start_new_session=True, env=_clean_env(),
+        subprocess.Popen([str(path), "--install"], start_new_session=True, env=system.child_env(),
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, cwd=str(Path.home()))
     log.info("Started installer %s", path)
