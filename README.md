@@ -132,10 +132,10 @@ python3 -m studiocord --replay <Studio log file>   # replay an old Studio sessio
 Building the standalone programs: `pip install pyinstaller PySide6-Essentials && python build.py`. On Windows,
 then run `iscc installer\studiocord.iss` (Inno Setup 6).
 
-Releases come from GitHub Actions ("Build & release"). Running it by hand with *publish*
-ticked builds both programs and publishes them as a **pre-release** for the version in
-`studiocord/__init__.py`, replacing the previous pre-release of that version. Make it a
-full release with `gh release edit v1.0.0 --prerelease=false --latest`.
+Releases come from GitHub Actions ("Build & release"). Bump `__version__` in
+`studiocord/__init__.py`, then run the workflow by hand with *publish* ticked (or push a
+tag like `v1.2.3`). It builds both programs and publishes them as a release for that
+version.
 
 ## Layout
 
