@@ -3,6 +3,7 @@
 import json
 import logging
 import threading
+import urllib.parse
 import urllib.request
 
 log = logging.getLogger("roblox")
@@ -21,6 +22,13 @@ def _get(url):
 def _is_placeholder(name: str) -> bool:
     """Roblox's stand-ins like "[TITLE UNAVAILABLE]" or "[ Content Deleted ]"."""
     return name.startswith("[") and name.endswith("]")
+
+
+def _is_placeholder_icon(url: str) -> bool:
+    """Games without an icon still come back "Completed", but with Roblox's grey
+    stand-in image: a static file (https://t5.rbxcdn.com/180DAY-<md5>) instead of a
+    rendered thumbnail (https://tr.rbxcdn.com/180DAY-<id>/512/512/Image/Png/noFilter)."""
+    return "/Image/" not in urllib.parse.urlsplit(url).path
 
 
 class PlaceInfo:
@@ -68,7 +76,11 @@ class PlaceLookup:
                 icons = _get("https://thumbnails.roblox.com/v1/games/icons?universeIds="
                              f"{universe_id}&size=512x512&format=Png&isCircular=false").get("data") or []
                 if icons and icons[0].get("state") == "Completed":
-                    info.icon_url = icons[0].get("imageUrl")
+                    url = icons[0].get("imageUrl") or ""
+                    if _is_placeholder_icon(url):
+                        log.info("Place %s has no game icon (placeholder)", place_id)
+                    else:
+                        info.icon_url = url
             log.info("Place %s -> %r (universe %s)", place_id, info.name, universe_id)
         except Exception as e:  # network down, private place, API change ...
             log.warning("Lookup for place %s failed: %s", place_id, e)
